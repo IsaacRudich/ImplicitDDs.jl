@@ -1,7 +1,5 @@
 # ImplicitDDs
 
-[![Build Status](https://github.com/IsaacRudich/ImplicitDDs.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/IsaacRudich/ImplicitDDs.jl/actions/workflows/CI.yml?query=branch%3Amain)
-
 A Mixed-Integer Programming solver using Decision Diagrams for branch-and-bound.
 
 ## When to Use ImplicitDDs
