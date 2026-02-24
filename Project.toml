@@ -1,0 +1,37 @@
+name = "ImplicitDDs"
+uuid = "7f79debc-84dd-4872-a081-4bf5bbdabaeb"
+authors = ["Isaac Rudich"]
+version = "0.1.0"
+
+[deps]
+Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
+HiGHS = "87dc4568-4c63-4d18-b0c0-bb2238e4078b"
+JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
+JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+MathOptInterface = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
+Metis = "2679e427-3c69-5b7f-982b-ece356f1e94b"
+PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+
+[compat]
+Graphs = "1.13.4"
+HiGHS = "1.20.1"
+JSON = "1.4.0"
+JuMP = "1.29.4"
+LinearAlgebra = "1.11.0"
+MathOptInterface = "1.48.0"
+Metis = "1.5.0"
+PrecompileTools = "1.2.1"
+Printf = "1.11.0"
+Random = "1.11.0"
+SparseArrays = "1.11.0"
+julia = "1.6"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
