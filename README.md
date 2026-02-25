@@ -2,7 +2,7 @@
 
 **ImplicitDDs.jl** is an exact MIP solver that uses decision diagram (DD) branch-and-bound in place of LP relaxations. Dual bounds come from *relaxed* DDs and primal bounds from *restricted* DDs. By reasoning over combinatorial structure rather than a linear approximation, this approach is most effective precisely where LP-based solvers struggle most.
 
-For more details, see our paper: [Implicit Decision Diagrams](https://arxiv.org/abs/2502.20793).
+For more details, see our paper: [Implicit Decision Diagrams](https://https://arxiv.org/abs/2602.20793).
 
 ## When to Use ImplicitDDs
 
