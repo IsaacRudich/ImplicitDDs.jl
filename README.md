@@ -2,6 +2,8 @@
 
 **ImplicitDDs.jl** is an exact MIP solver that uses decision diagram (DD) branch-and-bound in place of LP relaxations. Dual bounds come from *relaxed* DDs and primal bounds from *restricted* DDs. By reasoning over combinatorial structure rather than a linear approximation, this approach is most effective precisely where LP-based solvers struggle most.
 
+For more details, see our paper: [Implicit Decision Diagrams](https://arxiv.org/abs/2502.20793).
+
 ## When to Use ImplicitDDs
 
 ImplicitDDs is designed for specific problem characteristics:
@@ -144,4 +146,20 @@ objective_bound(model)     # Best bound (lower for min, upper for max)
 relative_gap(model)        # Relative optimality gap
 solve_time(model)          # Solve time in seconds
 value(x)                   # Variable values
+```
+
+## Citation
+
+If you use ImplicitDDs in your research, please cite:
+
+```bibtex
+@article{rudich2026implicitDDs,
+      title={Implicit Decision Diagrams}, 
+      author={Isaac Rudich and Louis-Martin Rousseau},
+      year={2026},
+      eprint={2602.20793},
+      archivePrefix={arXiv},
+      primaryClass={math.OC},
+      url={https://arxiv.org/abs/2602.20793}, 
+}
 ```
