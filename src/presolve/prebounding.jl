@@ -19,7 +19,9 @@ Optimization-Based Bound Tightening (OBBT): Relaxes integrality constraints and 
 - `tolerance::U`: Tolerance for floating point precision when rounding bounds (default: 1e-6)
 
 # Returns
-- `Bool`: `true` if all variables are bounded and problem is feasible, `false` if unbounded variables remain or problem is infeasible
+- `Tuple{Bool, Bool}`: A tuple containing:
+  1. `Bool`: `true` if all variables are bounded, `false` otherwise
+  2. `Bool`: `false` if the LP relaxation is infeasible, `true` otherwise
 
 # Algorithm
 1. Check if any variables are unbounded (at typemax/typemin limits)
@@ -42,7 +44,7 @@ function run_obbt!(upper_bounds_int::Union{Vector{Z}, BitVector}, lower_bounds_i
                         any(lb == typemin(T) for lb in lower_bounds_cont)
 
     if !has_unbounded_vars
-        return true
+        return true, true
     end
 
     undo_relaxation = relax_integrality(model)
@@ -70,7 +72,7 @@ function run_obbt!(upper_bounds_int::Union{Vector{Z}, BitVector}, lower_bounds_i
                     # Unbounded, infeasible, or other failure - cannot bound this variable
                     @objective(model, sense,obj_func)
                     undo_relaxation()
-                    return false
+                    return false, true
                 end
             end
 
@@ -90,7 +92,7 @@ function run_obbt!(upper_bounds_int::Union{Vector{Z}, BitVector}, lower_bounds_i
                     # Unbounded, infeasible, or other failure - cannot bound this variable
                     @objective(model, sense,obj_func)
                     undo_relaxation()
-                    return false
+                    return false, true
                 end
             end
         end
@@ -106,7 +108,7 @@ function run_obbt!(upper_bounds_int::Union{Vector{Z}, BitVector}, lower_bounds_i
                     # Unbounded, infeasible, or other failure - cannot bound this variable
                     @objective(model, sense,obj_func)
                     undo_relaxation()
-                    return false
+                    return false, true
                 end
             end
 
@@ -120,17 +122,19 @@ function run_obbt!(upper_bounds_int::Union{Vector{Z}, BitVector}, lower_bounds_i
                     # Unbounded, infeasible, or other failure - cannot bound this variable
                     @objective(model, sense,obj_func)
                     undo_relaxation()
-                    return false
+                    return false, true
                 end
             end
         end
 
         @objective(model, sense,obj_func)
         undo_relaxation()
-        return true
+        return true, true
     else
+        # Only an INFEASIBLE status proves the relaxation infeasible
+        relaxation_feasible = termination_status(model) != INFEASIBLE
         undo_relaxation()
-        return false
+        return false, relaxation_feasible
     end
 end
 
@@ -163,6 +167,53 @@ function get_var_refs(model::JuMP.Model)
 end
 
 """
+    integer_upper_bound(bound::Real; tolerance::Real = 1e-6)
+
+Converts a model upper bound on an integer variable to an Int.
+
+Rounds down to the largest integer within the bound, snapping to the nearest integer when within `tolerance` of it to absorb floating point noise in the model.
+Bounds outside the range of Int (e.g. 1e30 used as "infinity") are returned as the `typemax(Int)` sentinel so OBBT will try to find a finite bound.
+
+# Arguments
+- `bound::Real`: Upper bound from the model
+- `tolerance::Real`: Distance to the nearest integer within which the bound is snapped to it (default: 1e-6)
+
+# Returns
+- `Int`: Integer upper bound, or `typemax(Int)` if the bound is not representable
+"""
+function integer_upper_bound(bound::Real; tolerance::Real = 1e-6)
+    if !(typemin(Int) < bound < typemax(Int))
+        return typemax(Int)
+    end
+    nearest = round(bound)
+    return abs(bound - nearest) < tolerance ? Int(nearest) : floor(Int, bound)
+end
+
+"""
+    integer_lower_bound(bound::Real; tolerance::Real = 1e-6)
+
+Converts a model lower bound on an integer variable to an Int.
+
+Rounds up to the smallest integer within the bound, snapping to the nearest integer when within `tolerance` of it to absorb floating point noise in the model.
+Bounds outside the range of Int (e.g. -1e30 used as "-infinity") are returned as the `typemin(Int)` sentinel so OBBT will try to find a finite bound.
+
+# Arguments
+- `bound::Real`: Lower bound from the model
+- `tolerance::Real`: Distance to the nearest integer within which the bound is snapped to it (default: 1e-6)
+
+# Returns
+- `Int`: Integer lower bound, or `typemin(Int)` if the bound is not representable
+"""
+function integer_lower_bound(bound::Real; tolerance::Real = 1e-6)
+    if !(typemin(Int) < bound < typemax(Int))
+        return typemin(Int)
+    end
+    nearest = round(bound)
+    return abs(bound - nearest) < tolerance ? Int(nearest) : ceil(Int, bound)
+end
+
+
+"""
     extract_variable_bounds(integer_vars::Vector{JuMP.VariableRef}, continuous_vars::Vector{JuMP.VariableRef}, numerical_precision::DataType)
 
 Extracts bounds from JuMP variables, using reasonable defaults when bounds are not specified.
@@ -188,8 +239,11 @@ function extract_variable_bounds(integer_vars::Vector{JuMP.VariableRef}, continu
 
     # Extract integer variable bounds
     @inbounds for (i, var) in enumerate(integer_vars)
-        if has_upper_bound(var)
-            upper_bounds_int[i] = Int(upper_bound(var))
+        # JuMP reports no bounds for fixed variables, so read the fixed value directly
+        if is_fixed(var)
+            upper_bounds_int[i] = integer_upper_bound(fix_value(var))
+        elseif has_upper_bound(var)
+            upper_bounds_int[i] = integer_upper_bound(upper_bound(var))
         else
             upper_bounds_int[i] = typemax(Int)
         end
@@ -197,8 +251,10 @@ function extract_variable_bounds(integer_vars::Vector{JuMP.VariableRef}, continu
             upper_bounds_int[i] = 1
         end
 
-        if has_lower_bound(var)
-            lower_bounds_int[i] = Int(lower_bound(var))
+        if is_fixed(var)
+            lower_bounds_int[i] = integer_lower_bound(fix_value(var))
+        elseif has_lower_bound(var)
+            lower_bounds_int[i] = integer_lower_bound(lower_bound(var))
         else
             lower_bounds_int[i] = typemin(Int)
         end
@@ -209,13 +265,17 @@ function extract_variable_bounds(integer_vars::Vector{JuMP.VariableRef}, continu
 
     # Extract continuous variable bounds
     @inbounds for (i, var) in enumerate(continuous_vars)
-        if has_upper_bound(var)
+        if is_fixed(var)
+            upper_bounds_cont[i] = numerical_precision(fix_value(var))
+        elseif has_upper_bound(var)
             upper_bounds_cont[i] = numerical_precision(upper_bound(var))
         else
             upper_bounds_cont[i] = typemax(numerical_precision)
         end
 
-        if has_lower_bound(var)
+        if is_fixed(var)
+            lower_bounds_cont[i] = numerical_precision(fix_value(var))
+        elseif has_lower_bound(var)
             lower_bounds_cont[i] = numerical_precision(lower_bound(var))
         else
             lower_bounds_cont[i] = typemin(numerical_precision)

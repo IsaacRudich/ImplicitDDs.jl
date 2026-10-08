@@ -38,6 +38,7 @@ ImplicitDDs solver optimizer for MathOptInterface.
 | `wait_to_write_solutions` | Bool | false | Batch log writes |
 | `timer_outputs` | Bool | false | Detailed timing breakdown |
 | `custom_variable_order` | Vector{MOI.VariableIndex}/Nothing | nothing | Custom variable ordering |
+| `max_allowed_domain_size` | Int | 10000 | Largest integer variable domain (ub - lb + 1) accepted |
 | `MOI.Silent()` | Bool | false | Suppress all output |
 | `MOI.TimeLimitSec()` | Float64/Nothing | nothing | Time limit in seconds |
 
@@ -76,6 +77,7 @@ mutable struct Optimizer <: MOI.AbstractOptimizer
     wait_to_write_solutions::Bool
     timer_outputs::Bool
     custom_variable_order::Union{Vector{MOI.VariableIndex}, Nothing}
+    max_allowed_domain_size::Int
 
     # Standard MOI attributes
     time_limit::Union{Float64, Nothing}  # seconds (converted to minutes for solve_mip)
@@ -124,6 +126,7 @@ function Optimizer()
         false,          # wait_to_write_solutions
         false,          # timer_outputs
         nothing,        # custom_variable_order
+        10000,          # max_allowed_domain_size
         nothing,        # time_limit
         false,          # silent
 

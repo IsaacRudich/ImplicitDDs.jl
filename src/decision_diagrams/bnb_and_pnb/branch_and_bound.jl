@@ -86,6 +86,11 @@ to prove optimality.
   - **Validation**: Must contain exactly the same integer variables as the model (checked at runtime)
   - **Default**: `nothing` uses adaptive METIS-based ordering
 
+- `max_allowed_domain_size::Int = 10000`: Largest integer variable domain (ub - lb + 1) the solver will accept
+  - **Purpose**: DD widths must be at least the largest domain size, so memory required scales with width × domain size, and large domains exhaust memory
+  - **Behavior**: Checked after OBBT; the solver throws an error if any variable's domain is larger
+  - **How to choose**: Can be raised, but we don't recommend it
+
 # Returns
 
 Returns a tuple `(is_feasible, bks_int, bks_cont, bkv)`:
@@ -162,6 +167,7 @@ function solve_mip(
     timer_outputs::Bool = false,
     time_limit::Union{<:Real, Nothing} = nothing,
     custom_variable_order::Union{Vector{VariableRef}, Nothing} = nothing,
+    max_allowed_domain_size::Int = 10000,
     _force_parallel_precompile::Bool = false
 )
 
@@ -188,17 +194,47 @@ function solve_mip(
     time_limit_start = time()
     time_limit_seconds = isnothing(time_limit) ? nothing : Float64(time_limit * 60)
 
+    start_time = time()
+    if !suppress_all_prints
+        print("Running OBBT on any unbounded variables ... ")
+    end
+    #run obbt
+    has_bounded_variables, isRelaxationFeasible = run_obbt!(ubs_int, lbs_int, ubs_cont, lbs_cont, model, int_var_refs, cont_var_refs)
+    if !isRelaxationFeasible
+        if !suppress_all_prints
+            println("\n", "Problem Infeasible: because LP relaxation is infeasible")
+        end
+        OBBT_time = time() - start_time
+        finalize_and_log_timing!(timer_outputs, conversion_time, OBBT_time, true_start, log_file_path)
+        return return_infeasible(Int, numerical_precision, 0, time() - true_start, true, false)
+    elseif !has_bounded_variables
+        if !suppress_all_prints
+                println("\n","This solver requires bounded variables, and the solver was unable to bound all the variables.")
+        end
+        OBBT_time = time() - start_time
+        finalize_and_log_timing!(timer_outputs, conversion_time, OBBT_time, true_start, log_file_path)
+        return return_unbounded_error(Int, numerical_precision, time() - true_start)
+    end
+
+    if !suppress_all_prints
+        println("Finished")
+        # println("OBBT took: ", round(OBBT_time, digits=3), " seconds", "\n")
+    end
+    end_time = time()
+    OBBT_time = end_time - start_time
+
 
     start_time = time()
     if !suppress_all_prints
         print("Preallocating Memory ... ")
     end
     
-    # Ensure widths are at least as large as maximum domain size
-    max_domain_size = maximum(ubs_int .- lbs_int .+ 1)
+    # Reject domains too large to build DDs for, then ensure widths are at least as large as maximum domain size
+    max_domain_size = check_domain_sizes(lbs_int, ubs_int, int_var_refs, max_allowed_domain_size)
     relaxed_w = max(relaxed_w, max_domain_size)
     restricted_w = max(restricted_w, max_domain_size)
     w = max(relaxed_w, restricted_w)  # Use max for preallocation
+    check_workspace_memory(num_workers, num_int_vars, num_constraints, relaxed_w, w, max_domain_size, numerical_precision)
 
     if debug_mode
         println("\n","Adjusted widths: relaxed_w=", relaxed_w, ", restricted_w=", restricted_w, " (max domain size: ", max_domain_size, ")")
@@ -257,34 +293,6 @@ function solve_mip(
     end_time = time()
     preallocating_memory_time = end_time - start_time
 
-
-
-
-    start_time = time()
-    if !suppress_all_prints
-        print("Running OBBT on any unbounded variables ... ")
-    end
-    #run obbt
-    has_bounded_variables = run_obbt!(ubs_int, lbs_int, ubs_cont, lbs_cont, model, int_var_refs, cont_var_refs)
-    if !has_bounded_variables
-        if !suppress_all_prints
-                println("\n","This solver requires bounded variables, and the solver was unable to bound all the variables.")
-        end
-        OBBT_time = time() - start_time
-        finalize_and_log_timing!(
-            timer_outputs, wait_to_write_solutions, num_workers, dd_ws, dd_workspaces,
-            0.0, 0.0, conversion_time, preallocating_memory_time,
-            OBBT_time, 0.0, 0.0, 0.0, true_start, logs, log_file_path
-        )
-        return return_unbounded_error(int_data_type, numerical_precision, time() - true_start)
-    end
-
-    if !suppress_all_prints
-        println("Finished")
-        # println("OBBT took: ", round(OBBT_time, digits=3), " seconds", "\n")
-    end
-    end_time = time()
-    OBBT_time = end_time - start_time
 
 
 
@@ -956,6 +964,12 @@ function solve_mip(
         timing_end = time()
         double_counted_time += (timing_end - timing_start)
     end #end bnb parallel
+
+    # A DD that hits the time limit returns without enqueuing its children, so an empty
+    # queue only proves optimality if the time limit was not reached during the last node
+    if !timed_out && time_budget_exceeded(time_limit_seconds, time_limit_start)
+        timed_out = true
+    end
 
     if !suppress_all_prints
         println("\n","Finished Branch-and-Bound")

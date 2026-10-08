@@ -72,6 +72,7 @@ function MOI.optimize!(optimizer::Optimizer)
             timer_outputs = optimizer.timer_outputs,
             time_limit = time_limit_minutes,
             custom_variable_order = custom_order,
+            max_allowed_domain_size = optimizer.max_allowed_domain_size,
         )
     catch e
         optimizer.termination_status = MOI.OTHER_ERROR

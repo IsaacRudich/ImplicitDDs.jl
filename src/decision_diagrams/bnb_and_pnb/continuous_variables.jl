@@ -233,8 +233,16 @@ function resolve_continuous_variables!(
         end
 
         # Fix integer variables to solver solution values
+        # fix(...; force = true) deletes variable bounds and unfix does not restore them,
+        # so save them first to leave the caller's model unchanged.
+        # Variables already fixed in the model must take that value, so they are left untouched.
+        original_lbs = Union{Nothing, Float64}[has_lower_bound(var) ? lower_bound(var) : nothing for var in int_var_refs]
+        original_ubs = Union{Nothing, Float64}[has_upper_bound(var) ? upper_bound(var) : nothing for var in int_var_refs]
+        was_fixed = is_fixed.(int_var_refs)
         @inbounds for i in 1:num_int_vars
-            fix(int_var_refs[i], bks_int[i]; force = true)
+            if !was_fixed[i]
+                fix(int_var_refs[i], bks_int[i]; force = true)
+            end
         end
 
         # Solve the LP with fixed integers
@@ -258,9 +266,14 @@ function resolve_continuous_variables!(
             end
         end
 
-        # Unfix integer variables for future use
+        # Unfix integer variables and restore their original bounds
         @inbounds for i in 1:num_int_vars
-            unfix(int_var_refs[i])
+            if !was_fixed[i]
+                var = int_var_refs[i]
+                unfix(var)
+                !isnothing(original_lbs[i]) && set_lower_bound(var, original_lbs[i])
+                !isnothing(original_ubs[i]) && set_upper_bound(var, original_ubs[i])
+            end
         end
     end
 

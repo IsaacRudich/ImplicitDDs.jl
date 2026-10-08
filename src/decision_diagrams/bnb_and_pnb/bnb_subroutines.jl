@@ -310,6 +310,75 @@ end
 
 
 """
+    check_domain_sizes(lbs_int::Vector{Int}, ubs_int::Vector{Int}, int_var_refs::Vector{JuMP.VariableRef}, max_allowed_domain_size::Int)
+
+Throws an error if any integer variable's domain (ub - lb + 1) is larger than `max_allowed_domain_size`.
+
+Called after OBBT, so every bound is finite. DD widths must be at least the largest domain size, and several
+workspaces scale with width × domain size, so very large domains cannot be solved in practice.
+
+# Arguments
+- `lbs_int::Vector{Int}`: Lower bounds for integer variables (after OBBT)
+- `ubs_int::Vector{Int}`: Upper bounds for integer variables (after OBBT)
+- `int_var_refs::Vector{JuMP.VariableRef}`: Integer variable references, in the same order as the bounds (for the error message)
+- `max_allowed_domain_size::Int`: Largest domain size the solver accepts
+
+# Returns
+- `Int`: The largest domain size
+"""
+function check_domain_sizes(lbs_int::Vector{Int}, ubs_int::Vector{Int}, int_var_refs::Vector{JuMP.VariableRef}, max_allowed_domain_size::Int)
+    # Int128 because ub - lb + 1 can overflow Int when bounds are near typemin/typemax
+    domain_sizes = Int128.(ubs_int) .- Int128.(lbs_int) .+ 1
+    largest_size, largest_idx = findmax(domain_sizes)
+
+    if largest_size > max_allowed_domain_size
+        error("Variable domain size exceeds max_allowed_domain_size even after OBBT: ",
+              int_var_refs[largest_idx], " has domain size ", largest_size, " (limit ", max_allowed_domain_size, "). ",
+              "This limit can be changed with the max_allowed_domain_size parameter, but we don't recommend it.")
+    end
+
+    return Int(largest_size)
+end
+
+
+"""
+    check_workspace_memory(num_workers::Int, num_int_vars::Int, num_constraints::Int, relaxed_w::Int, w::Int, max_domain_size::Int, numerical_precision::DataType)
+
+Throws an error if the DD workspace buffers that scale with domain size would not fit in this machine's total memory.
+
+Only counts the buffers that scale with `max_domain_size`; their sizes must match `preallocate_dd_memory`.
+
+# Arguments
+- `num_workers::Int`: Number of worker threads (each allocates its own workspace)
+- `num_int_vars::Int`: Number of integer variables
+- `num_constraints::Int`: Number of constraints
+- `relaxed_w::Int`: Width for relaxed decision diagrams (after raising to at least max_domain_size)
+- `w::Int`: Maximum width across both DD types
+- `max_domain_size::Int`: Largest integer variable domain size
+- `numerical_precision::DataType`: Float type used in the workspaces
+"""
+function check_workspace_memory(num_workers::Int, num_int_vars::Int, num_constraints::Int, relaxed_w::Int, w::Int, max_domain_size::Int, numerical_precision::DataType)
+    # Matches type_w in preallocate_dd_memory: the smallest integer type that holds relaxed_w
+    bytes_w = relaxed_w <= typemax(Int8) ? 1 : relaxed_w <= typemax(Int16) ? 2 : relaxed_w <= typemax(Int32) ? 4 : 8
+    bytes_t = sizeof(numerical_precision)
+
+    # Float64 so the products cannot overflow Int
+    K = Float64(max_domain_size)
+    bytes_per_worker = 3 * relaxed_w * K * bytes_w +                 # node_bin_counts, node_cumulative, bins_matrix
+                       (K + 1) * w * bytes_w +                       # restricted_bins_matrix
+                       num_constraints * K * num_int_vars * bytes_t +  # gap_adjustments
+                       K * num_int_vars * bytes_t                    # coeff_times_val
+
+    required = num_workers * bytes_per_worker
+    available = Sys.total_memory()
+    if required > available
+        error(@sprintf("Not enough memory: largest variable domain size %d with relaxed width %d needs about %.1f GB across %d worker(s), but this machine has %.1f GB.",
+                       max_domain_size, relaxed_w, required / 1e9, num_workers, available / 1e9))
+    end
+end
+
+
+"""
     compute_workspace_memory(dd_workspaces::Vector{DDWorkspace{Z, T}}) where {Z<:Integer, T<:Real}
 
 Computes the total memory used by all DD workspaces in bytes.
@@ -687,5 +756,37 @@ function finalize_and_log_timing!(
 
     if wait_to_write_solutions
         write_logs_to_file(logs, log_file_path)
+    end
+end
+
+
+"""
+    finalize_and_log_timing!(timer_outputs::Bool, conversion_time::Float64, OBBT_time::Float64, true_start::Float64, log_file_path::Union{String, Nothing})
+
+Early-exit version of `finalize_and_log_timing!` for returns that happen before any DDWorkspace exists (e.g. OBBT failure).
+
+No workspace timing stats or solution logs exist yet, so this only reports the timing that is available.
+
+# Arguments
+- `timer_outputs::Bool`: Whether to compute and log timing statistics
+- `conversion_time::Float64`: Time spent converting model to internal format
+- `OBBT_time::Float64`: Time spent in optimization-based bound tightening
+- `true_start::Float64`: Absolute start time of solve
+- `log_file_path::Union{String, Nothing}`: Path to log file, or nothing if logging disabled
+"""
+function finalize_and_log_timing!(
+    timer_outputs                  ::Bool,
+    conversion_time                ::Float64,
+    OBBT_time                      ::Float64,
+    true_start                     ::Float64,
+    log_file_path                  ::Union{String, Nothing}
+)
+    if timer_outputs
+        clock_time = time() - true_start
+        log_timing_stats(
+            TimingStats(),
+            model_conversion_time = conversion_time, obbt_time = OBBT_time,
+            clock_time = clock_time, timing_log_file = log_file_path
+        )
     end
 end
