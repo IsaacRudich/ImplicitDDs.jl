@@ -59,14 +59,9 @@ function run_obbt!(upper_bounds_int::Union{Vector{Z}, BitVector}, lower_bounds_i
             if upper_bounds_int[i] == typemax(Int)
                 @objective(model, Max, var)
                 optimize!(model)
-                if termination_status(model) == OPTIMAL
-                    raw_val = objective_value(model)
-                    # Handle floating point precision errors: if very close to integer, round to it
-                    if abs(raw_val - round(raw_val)) < tolerance
-                        obj_val = Int(round(raw_val))
-                    else
-                        obj_val = Int(floor(raw_val))
-                    end
+                # A bound too large for an Int comes back as the sentinel and counts as unbounded
+                obj_val = termination_status(model) == OPTIMAL ? integer_upper_bound(objective_value(model); tolerance = tolerance) : typemax(Int)
+                if obj_val != typemax(Int)
                     upper_bounds_int[i] = obj_val
                 else
                     # Unbounded, infeasible, or other failure - cannot bound this variable
@@ -79,14 +74,9 @@ function run_obbt!(upper_bounds_int::Union{Vector{Z}, BitVector}, lower_bounds_i
             if lower_bounds_int[i] == typemin(Int)
                 @objective(model, Min, var)
                 optimize!(model)
-                if termination_status(model) == OPTIMAL
-                    raw_val = objective_value(model)
-                    # Handle floating point precision errors: if very close to integer, round to it
-                    if abs(raw_val - round(raw_val)) < tolerance
-                        obj_val = Int(round(raw_val))
-                    else
-                        obj_val = Int(ceil(raw_val))
-                    end
+                # A bound too large for an Int comes back as the sentinel and counts as unbounded
+                obj_val = termination_status(model) == OPTIMAL ? integer_lower_bound(objective_value(model); tolerance = tolerance) : typemin(Int)
+                if obj_val != typemin(Int)
                     lower_bounds_int[i] = obj_val
                 else
                     # Unbounded, infeasible, or other failure - cannot bound this variable
