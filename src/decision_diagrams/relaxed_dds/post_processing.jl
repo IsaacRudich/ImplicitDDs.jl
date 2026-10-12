@@ -587,83 +587,6 @@ end
 
 
 """
-    compute_path_rhs!(rhs_buffer::Vector{U}, path::Union{Vector{Z}, BitVector}, coefficient_matrix_int_cols::Matrix{U}, coefficient_matrix_rhs_vector::Vector{U}, num_int_vars::Int, num_constraints::Int) where {Z<:Integer, U<:Real}
-
-Computes the exact right-hand side of the continuous subproblem for a complete integer path, `b - A_int * path`.
-
-The gaps stored in the DD are clamped to be non-negative, so the right-hand side derived from them can be looser
-than this one when the integer part slightly violates a constraint.
-
-# Arguments
-- `rhs_buffer::Vector{U}`: Preallocated working vector of length num_constraints, overwritten with the right-hand side
-- `path::Union{Vector{Z}, BitVector}`: Complete integer path (length num_int_vars)
-- `coefficient_matrix_int_cols::Matrix{U}`: Coefficient matrix for integer variables
-- `coefficient_matrix_rhs_vector::Vector{U}`: Right-hand side values for constraints
-- `num_int_vars::Int`: Number of integer variables
-- `num_constraints::Int`: Number of constraints
-"""
-function compute_path_rhs!(
-    rhs_buffer                   ::Vector{U},
-    path                         ::Union{Vector{Z}, BitVector},
-    coefficient_matrix_int_cols  ::Matrix{U},
-    coefficient_matrix_rhs_vector::Vector{U},
-    num_int_vars                 ::Int,
-    num_constraints              ::Int
-) where {Z<:Integer, U<:Real}
-    # Accumulate b - A_int * path one column at a time
-    rhs_buffer .= coefficient_matrix_rhs_vector
-    @inbounds for j in 1:num_int_vars
-        val = path[j]
-        val == 0 && continue
-        col = view(coefficient_matrix_int_cols, :, j)
-        @simd for i in 1:num_constraints
-            rhs_buffer[i] -= col[i] * val
-        end
-    end
-end
-
-
-"""
-    run_path_LP!(rhs::Vector{U}, num_constraints::Int, lp_sub_model::JuMP.Model, lp_constraint_refs::Vector{JuMP.ConstraintRef}, timing_stats::TimingStats) where {U<:Real}
-
-Solves the continuous subproblem with the given right-hand side, typically the exact one from `compute_path_rhs!`.
-
-# Arguments
-- `rhs::Vector{U}`: Right-hand side for each constraint
-- `num_constraints::Int`: Number of constraints
-- `lp_sub_model::JuMP.Model`: LP model for continuous variables
-- `lp_constraint_refs::Vector{JuMP.ConstraintRef}`: References to LP constraint objects
-- `timing_stats::TimingStats`: Timing statistics tracker for relaxed DD operations
-
-# Returns
-- `Tuple{Bool, U}`: A tuple containing:
-  1. `Bool`: True if the LP was solved to optimality, false otherwise
-  2. `U`: Objective contribution from continuous variables (zero if not optimal)
-"""
-function run_path_LP!(
-    rhs                 ::Vector{U},
-    num_constraints     ::Int,
-    lp_sub_model        ::JuMP.Model,
-    lp_constraint_refs  ::Vector{JuMP.ConstraintRef},
-    timing_stats        ::TimingStats
-) where {U<:Real}
-    @inbounds for row_idx in 1:num_constraints
-        set_normalized_rhs(lp_constraint_refs[row_idx], rhs[row_idx])
-    end
-
-    @time_operation timing_stats post_relaxed_dd_true_LP begin
-        optimize!(lp_sub_model)
-    end
-    timing_stats.simplex_iterations += MOI.get(lp_sub_model, MOI.SimplexIterations())
-
-    if termination_status(lp_sub_model) == MOI.OPTIMAL
-        return true, U(objective_value(lp_sub_model))
-    end
-    return false, zero(U)
-end
-
-
-"""
     handle_exact_terminal_nodes!(
         ltr_matrix::Matrix{U},
         relaxed_dd::Vector{NodeLayer{Z}}, cur_layr_idx::Int, first_layer::Int,
@@ -834,7 +757,9 @@ function handle_exact_terminal_nodes!(
                             end
                             if rhs_was_loosened
                                 @time_operation timing_stats post_relaxed_dd_potential_low_level_LP begin
-                                    is_feasible, cont_contribution = run_path_LP!(wrk_vec, num_constraints, lp_sub_model, lp_constraint_refs, timing_stats)
+                                    @time_operation timing_stats post_relaxed_dd_true_LP begin
+                                        is_feasible, cont_contribution = run_path_LP!(wrk_vec, num_constraints, lp_sub_model, lp_constraint_refs, timing_stats)
+                                    end
                                 end
                                 total_obj_value = node_ltr + cont_contribution
                             end

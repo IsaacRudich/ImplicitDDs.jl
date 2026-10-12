@@ -279,3 +279,79 @@ function resolve_continuous_variables!(
 
     return bkv
 end
+
+
+"""
+    compute_path_rhs!(rhs_buffer::Vector{U}, path::Union{Vector{Z}, BitVector}, coefficient_matrix_int_cols::Matrix{U}, coefficient_matrix_rhs_vector::Vector{U}, num_int_vars::Int, num_constraints::Int) where {Z<:Integer, U<:Real}
+
+Computes the exact right-hand side of the continuous subproblem for a complete integer path, `b - A_int * path`.
+
+The gaps stored in the DDs are clamped to be non-negative, so the right-hand side derived from them can be looser
+than this one when the integer part slightly violates a constraint.
+
+# Arguments
+- `rhs_buffer::Vector{U}`: Preallocated working vector of length num_constraints, overwritten with the right-hand side
+- `path::Union{Vector{Z}, BitVector}`: Complete integer path (length num_int_vars)
+- `coefficient_matrix_int_cols::Matrix{U}`: Coefficient matrix for integer variables
+- `coefficient_matrix_rhs_vector::Vector{U}`: Right-hand side values for constraints
+- `num_int_vars::Int`: Number of integer variables
+- `num_constraints::Int`: Number of constraints
+"""
+function compute_path_rhs!(
+    rhs_buffer                   ::Vector{U},
+    path                         ::Union{Vector{Z}, BitVector},
+    coefficient_matrix_int_cols  ::Matrix{U},
+    coefficient_matrix_rhs_vector::Vector{U},
+    num_int_vars                 ::Int,
+    num_constraints              ::Int
+) where {Z<:Integer, U<:Real}
+    # Accumulate b - A_int * path one column at a time
+    rhs_buffer .= coefficient_matrix_rhs_vector
+    @inbounds for j in 1:num_int_vars
+        val = path[j]
+        val == 0 && continue
+        col = view(coefficient_matrix_int_cols, :, j)
+        @simd for i in 1:num_constraints
+            rhs_buffer[i] -= col[i] * val
+        end
+    end
+end
+
+
+"""
+    run_path_LP!(rhs::Vector{U}, num_constraints::Int, lp_sub_model::JuMP.Model, lp_constraint_refs::Vector{JuMP.ConstraintRef}, timing_stats::TimingStats) where {U<:Real}
+
+Solves the continuous subproblem with the given right-hand side, typically the exact one from `compute_path_rhs!`.
+Callers time the call with their own LP timer, since the restricted and relaxed DDs track LP time separately.
+
+# Arguments
+- `rhs::Vector{U}`: Right-hand side for each constraint
+- `num_constraints::Int`: Number of constraints
+- `lp_sub_model::JuMP.Model`: LP model for continuous variables
+- `lp_constraint_refs::Vector{JuMP.ConstraintRef}`: References to LP constraint objects
+- `timing_stats::TimingStats`: Timing statistics tracker (simplex iterations are added to it)
+
+# Returns
+- `Tuple{Bool, U}`: A tuple containing:
+  1. `Bool`: True if the LP was solved to optimality, false otherwise
+  2. `U`: Objective contribution from continuous variables (zero if not optimal)
+"""
+function run_path_LP!(
+    rhs                 ::Vector{U},
+    num_constraints     ::Int,
+    lp_sub_model        ::JuMP.Model,
+    lp_constraint_refs  ::Vector{JuMP.ConstraintRef},
+    timing_stats        ::TimingStats
+) where {U<:Real}
+    @inbounds for row_idx in 1:num_constraints
+        set_normalized_rhs(lp_constraint_refs[row_idx], rhs[row_idx])
+    end
+
+    optimize!(lp_sub_model)
+    timing_stats.simplex_iterations += MOI.get(lp_sub_model, MOI.SimplexIterations())
+
+    if termination_status(lp_sub_model) == MOI.OPTIMAL
+        return true, U(objective_value(lp_sub_model))
+    end
+    return false, zero(U)
+end

@@ -133,7 +133,7 @@ end
 
 
 """
-    setup_and_run_restricted_dd!(rdd::RestrictedDD, bkv::T, bks_int::Union{Vector{Z}, BitVector}, bks_cont::Vector{T}, obj_const::T, int_var_to_pos_rows::Dict{Int, Vector{Int}}, int_var_to_neg_rows::Dict{Int, Vector{Int}}, ubs_int::Union{Vector{Z}, BitVector}, lbs_int::Union{Vector{Z}, BitVector}, original_lbs_int::Union{Vector{Z}, BitVector}, num_int_vars::Int, num_cont_vars::Int, num_constraints::Int, rough_bounds_int::Vector{T}, rough_bounds_cont_val::T, infimum_gaps::Vector{T}, cont_inf_gap_ctrbtns::Vector{T}, coeff_times_val::Matrix{T}, gap_adjustments::Array{T,3}, inv_coeff::Matrix{T}, inv_obj_coeffs::Vector{T}, lp_sub_model::JuMP.Model, lp_vars::Vector{JuMP.VariableRef}, lp_constraint_refs::Vector{JuMP.ConstraintRef}, bin_counts::Vector{<:Integer}, bins_matrix::Matrix{<:Integer}, cumulative_bins::Vector{<:Integer}, w::Int, num_LPs_to_run::Int, timing_stats::TimingStats, time_remaining::Union{Float64, Nothing} = nothing) where {Z<:Integer, T<:Real}
+    setup_and_run_restricted_dd!(rdd::RestrictedDD, bkv::T, bks_int::Union{Vector{Z}, BitVector}, bks_cont::Vector{T}, obj_const::T, int_var_to_pos_rows::Dict{Int, Vector{Int}}, int_var_to_neg_rows::Dict{Int, Vector{Int}}, ubs_int::Union{Vector{Z}, BitVector}, lbs_int::Union{Vector{Z}, BitVector}, original_lbs_int::Union{Vector{Z}, BitVector}, num_int_vars::Int, num_cont_vars::Int, num_constraints::Int, rough_bounds_int::Vector{T}, rough_bounds_cont_val::T, infimum_gaps::Vector{T}, cont_inf_gap_ctrbtns::Vector{T}, coeff_times_val::Matrix{T}, gap_adjustments::Array{T,3}, inv_coeff::Matrix{T}, inv_obj_coeffs::Vector{T}, lp_sub_model::JuMP.Model, lp_vars::Vector{JuMP.VariableRef}, lp_constraint_refs::Vector{JuMP.ConstraintRef}, bin_counts::Vector{<:Integer}, bins_matrix::Matrix{<:Integer}, cumulative_bins::Vector{<:Integer}, coefficient_matrix_int_cols::Matrix{T}, coefficient_matrix_rhs_vector::Vector{T}, path_buffer::Union{Vector{Z}, BitVector}, wrk_vec::Vector{T}, w::Int, num_LPs_to_run::Int, timing_stats::TimingStats, time_remaining::Union{Float64, Nothing} = nothing; constraint_feasibility_tol::T) where {Z<:Integer, T<:Real}
 
 Initializes and constructs a complete restricted decision diagram from the root to find initial feasible MIP solutions.
 
@@ -165,10 +165,15 @@ Initializes and constructs a complete restricted decision diagram from the root 
 - `bin_counts::Vector{<:Integer}`: Pre-allocated workspace vector for histogram bin counting [w]
 - `bins_matrix::Matrix{<:Integer}`: Pre-allocated workspace matrix for arc-to-bin mapping [max_domain_size, w]
 - `cumulative_bins::Vector{<:Integer}`: Pre-allocated workspace vector for cumulative sum computation [w]
+- `coefficient_matrix_int_cols::Matrix{T}`: Coefficient matrix for integer variables (for verifying solutions)
+- `coefficient_matrix_rhs_vector::Vector{T}`: Right-hand side values for constraints (for verifying solutions)
+- `path_buffer::Union{Vector{Z}, BitVector}`: Preallocated path vector for candidate solutions
+- `wrk_vec::Vector{T}`: Preallocated working vector of length num_constraints
 - `w::Int`: Width limit for the restricted decision diagram
 - `num_LPs_to_run::Int`: Maximum number of LP subproblems to solve at terminal nodes
 - `timing_stats::TimingStats`: Timing statistics collector for performance profiling
 - `time_remaining::Union{Float64, Nothing}`: Time budget in seconds for this function (nothing if no time limit)
+- `constraint_feasibility_tol::T`: Amount by which an accepted solution may violate each constraint
 
 # Returns
 - `Tuple{T, Bool, Bool}`: A tuple containing:
@@ -211,11 +216,18 @@ function setup_and_run_restricted_dd!(
     bins_matrix         ::Matrix{<:Integer},
     cumulative_bins     ::Vector{<:Integer},
 
+    #solution verification
+    coefficient_matrix_int_cols  ::Matrix{T},
+    coefficient_matrix_rhs_vector::Vector{T},
+    path_buffer         ::Union{Vector{Z}, BitVector},
+    wrk_vec             ::Vector{T},
+
     #settings
     w                   ::Int,
     num_LPs_to_run      ::Int,
     timing_stats        ::TimingStats,
-    time_remaining      ::Union{Float64, Nothing} = nothing,
+    time_remaining      ::Union{Float64, Nothing} = nothing;
+    constraint_feasibility_tol::T
 )where{Z<:Integer, T<:Real}
     fn_start = time()
     @time_operation timing_stats restricted_dd begin
@@ -237,7 +249,7 @@ function setup_and_run_restricted_dd!(
 
         @time_operation timing_stats post_restricted_dd begin
             if is_feasible
-                bkv, is_feasible, is_exact = post_process_restricted_dd!(bkv, bks_int, bks_cont, is_exact, rdd, terminal_gap_buffer, nothing, 1, num_int_vars, num_cont_vars, num_constraints, cont_inf_gap_ctrbtns, rough_bounds_cont_val, lp_sub_model, lp_vars, lp_constraint_refs, num_LPs_to_run, timing_stats, calculate_child_time_budget(time_remaining, fn_start))
+                bkv, is_feasible, is_exact = post_process_restricted_dd!(bkv, bks_int, bks_cont, is_exact, rdd, terminal_gap_buffer, nothing, 1, num_int_vars, num_cont_vars, num_constraints, cont_inf_gap_ctrbtns, rough_bounds_cont_val, lp_sub_model, lp_vars, lp_constraint_refs, num_LPs_to_run, coefficient_matrix_int_cols, coefficient_matrix_rhs_vector, path_buffer, wrk_vec, timing_stats, calculate_child_time_budget(time_remaining, fn_start); constraint_feasibility_tol = constraint_feasibility_tol)
             end
         end
     end
@@ -247,7 +259,7 @@ end
 
 
 """
-    setup_and_run_restricted_dd!(rdd::RestrictedDD, qnode::QueueNode, bkv::T, bks_int::Union{Vector{Z}, BitVector}, bks_cont::Vector{T}, int_var_to_pos_rows::Dict{Int, Vector{Int}}, int_var_to_neg_rows::Dict{Int, Vector{Int}}, ubs_int::Union{Vector{Z}, BitVector}, lbs_int::Union{Vector{Z}, BitVector}, original_lbs_int::Union{Vector{Z}, BitVector}, num_int_vars::Int, num_cont_vars::Int, num_constraints::Int, rough_bounds_int::Vector{T}, rough_bounds_cont_val::T, infimum_gaps::Vector{T}, cont_inf_gap_ctrbtns::Vector{T}, coeff_times_val::Matrix{T}, gap_adjustments::Array{T,3}, inv_coeff::Matrix{T}, inv_obj_coeffs::Vector{T}, lp_sub_model::JuMP.Model, lp_vars::Vector{JuMP.VariableRef}, lp_constraint_refs::Vector{JuMP.ConstraintRef}, bin_counts::Vector{<:Integer}, bins_matrix::Matrix{<:Integer}, cumulative_bins::Vector{<:Integer}, w::Int, num_LPs_to_run::Int, timing_stats::TimingStats, time_remaining::Union{Float64, Nothing} = nothing) where {Z<:Integer, T<:Real}
+    setup_and_run_restricted_dd!(rdd::RestrictedDD, qnode::QueueNode, bkv::T, bks_int::Union{Vector{Z}, BitVector}, bks_cont::Vector{T}, int_var_to_pos_rows::Dict{Int, Vector{Int}}, int_var_to_neg_rows::Dict{Int, Vector{Int}}, ubs_int::Union{Vector{Z}, BitVector}, lbs_int::Union{Vector{Z}, BitVector}, original_lbs_int::Union{Vector{Z}, BitVector}, num_int_vars::Int, num_cont_vars::Int, num_constraints::Int, rough_bounds_int::Vector{T}, rough_bounds_cont_val::T, infimum_gaps::Vector{T}, cont_inf_gap_ctrbtns::Vector{T}, coeff_times_val::Matrix{T}, gap_adjustments::Array{T,3}, inv_coeff::Matrix{T}, inv_obj_coeffs::Vector{T}, lp_sub_model::JuMP.Model, lp_vars::Vector{JuMP.VariableRef}, lp_constraint_refs::Vector{JuMP.ConstraintRef}, bin_counts::Vector{<:Integer}, bins_matrix::Matrix{<:Integer}, cumulative_bins::Vector{<:Integer}, coefficient_matrix_int_cols::Matrix{T}, coefficient_matrix_rhs_vector::Vector{T}, path_buffer::Union{Vector{Z}, BitVector}, wrk_vec::Vector{T}, w::Int, num_LPs_to_run::Int, timing_stats::TimingStats, time_remaining::Union{Float64, Nothing} = nothing; constraint_feasibility_tol::T) where {Z<:Integer, T<:Real}
 
 Constructs a restricted decision diagram from a branch-and-bound queue node with partially fixed integer variables.
 
@@ -279,10 +291,15 @@ Constructs a restricted decision diagram from a branch-and-bound queue node with
 - `bin_counts::Vector{<:Integer}`: Pre-allocated workspace vector for histogram bin counting [w]
 - `bins_matrix::Matrix{<:Integer}`: Pre-allocated workspace matrix for arc-to-bin mapping [max_domain_size, w]
 - `cumulative_bins::Vector{<:Integer}`: Pre-allocated workspace vector for cumulative sum computation [w]
+- `coefficient_matrix_int_cols::Matrix{T}`: Coefficient matrix for integer variables (for verifying solutions)
+- `coefficient_matrix_rhs_vector::Vector{T}`: Right-hand side values for constraints (for verifying solutions)
+- `path_buffer::Union{Vector{Z}, BitVector}`: Preallocated path vector for candidate solutions
+- `wrk_vec::Vector{T}`: Preallocated working vector of length num_constraints
 - `w::Int`: Width limit for the restricted decision diagram
 - `num_LPs_to_run::Int`: Maximum number of LP subproblems to solve at terminal nodes
 - `timing_stats::TimingStats`: Timing statistics collector for performance profiling
 - `time_remaining::Union{Float64, Nothing}`: Time budget in seconds for this function (nothing if no time limit)
+- `constraint_feasibility_tol::T`: Amount by which an accepted solution may violate each constraint
 
 # Returns
 - `Tuple{T, Bool}`: A tuple containing:
@@ -325,11 +342,18 @@ function setup_and_run_restricted_dd!(
     bins_matrix         ::Matrix{<:Integer},
     cumulative_bins     ::Vector{<:Integer},
 
+    #solution verification
+    coefficient_matrix_int_cols  ::Matrix{T},
+    coefficient_matrix_rhs_vector::Vector{T},
+    path_buffer         ::Union{Vector{Z}, BitVector},
+    wrk_vec             ::Vector{T},
+
     #settings
     w                   ::Int,
     num_LPs_to_run      ::Int,
     timing_stats        ::TimingStats,
-    time_remaining      ::Union{Float64, Nothing} = nothing,
+    time_remaining      ::Union{Float64, Nothing} = nothing;
+    constraint_feasibility_tol::T
 )where{Z<:Integer, T<:Real}
     fn_start = time()
     @time_operation timing_stats restricted_dd begin
@@ -354,7 +378,7 @@ function setup_and_run_restricted_dd!(
 
         @time_operation timing_stats post_restricted_dd begin
             if is_feasible
-                bkv, is_feasible, is_exact = post_process_restricted_dd!(bkv, bks_int, bks_cont, is_exact, rdd, terminal_gap_buffer, qnode, first_layer_idx, num_int_vars, num_cont_vars, num_constraints, cont_inf_gap_ctrbtns, rough_bounds_cont_val, lp_sub_model, lp_vars, lp_constraint_refs, num_LPs_to_run, timing_stats, calculate_child_time_budget(time_remaining, fn_start))
+                bkv, is_feasible, is_exact = post_process_restricted_dd!(bkv, bks_int, bks_cont, is_exact, rdd, terminal_gap_buffer, qnode, first_layer_idx, num_int_vars, num_cont_vars, num_constraints, cont_inf_gap_ctrbtns, rough_bounds_cont_val, lp_sub_model, lp_vars, lp_constraint_refs, num_LPs_to_run, coefficient_matrix_int_cols, coefficient_matrix_rhs_vector, path_buffer, wrk_vec, timing_stats, calculate_child_time_budget(time_remaining, fn_start); constraint_feasibility_tol = constraint_feasibility_tol)
             end
         end
     end
@@ -363,9 +387,10 @@ function setup_and_run_restricted_dd!(
 end
 
 """
-    post_process_restricted_dd!(bkv::V, bks_int::Union{Vector{Z}, BitVector}, bks_cont::Vector{V}, is_exact::Bool, rdd::RestrictedDD, terminal_gap_buffer::Matrix{V}, qnode::Union{QueueNode, Nothing}, first_layer_idx::Int, num_int_vars::Int, num_cont_vars::Int, num_constraints::Int, cont_inf_gap_ctrbtns::Vector{V}, rough_bounds_cont_val::V, lp_sub_model::JuMP.Model, lp_vars::Vector{JuMP.VariableRef}, lp_constraint_refs::Vector{JuMP.ConstraintRef}, num_LPs_to_run::Int, timing_stats::TimingStats, time_remaining::Union{Float64, Nothing} = nothing) where {Z<:Integer, V<:Real}
+    post_process_restricted_dd!(bkv::V, bks_int::Union{Vector{Z}, BitVector}, bks_cont::Vector{V}, is_exact::Bool, rdd::RestrictedDD, terminal_gap_buffer::Matrix{V}, qnode::Union{QueueNode, Nothing}, first_layer_idx::Int, num_int_vars::Int, num_cont_vars::Int, num_constraints::Int, cont_inf_gap_ctrbtns::Vector{V}, rough_bounds_cont_val::V, lp_sub_model::JuMP.Model, lp_vars::Vector{JuMP.VariableRef}, lp_constraint_refs::Vector{JuMP.ConstraintRef}, num_LPs_to_run::Int, coefficient_matrix_int_cols::Matrix{V}, coefficient_matrix_rhs_vector::Vector{V}, path_buffer::Union{Vector{Z}, BitVector}, wrk_vec::Vector{V}, timing_stats::TimingStats, time_remaining::Union{Float64, Nothing} = nothing; constraint_feasibility_tol::V) where {Z<:Integer, V<:Real}
 
 Post-processes restricted decision diagram results by solving continuous LPs and reconstructing solution paths.
+A solution that would improve bkv is verified against the original constraints before it is accepted.
 
 # Arguments
 - `bkv::V`: Best known objective value to compare against for solution updates
@@ -385,8 +410,13 @@ Post-processes restricted decision diagram results by solving continuous LPs and
 - `lp_vars::Vector{JuMP.VariableRef}`: References to continuous variable objects
 - `lp_constraint_refs::Vector{JuMP.ConstraintRef}`: References to constraint objects for RHS updates
 - `num_LPs_to_run::Int`: Maximum number of LP subproblems to solve
+- `coefficient_matrix_int_cols::Matrix{V}`: Coefficient matrix for integer variables (for verifying solutions)
+- `coefficient_matrix_rhs_vector::Vector{V}`: Right-hand side values for constraints (for verifying solutions)
+- `path_buffer::Union{Vector{Z}, BitVector}`: Preallocated path vector for candidate solutions
+- `wrk_vec::Vector{V}`: Preallocated working vector of length num_constraints
 - `timing_stats::TimingStats`: Timing statistics collector for performance profiling
 - `time_remaining::Union{Float64, Nothing}`: Time budget in seconds for this function (nothing if no time limit)
+- `constraint_feasibility_tol::V`: Amount by which an accepted solution may violate each constraint
 
 # Returns
 - `Tuple{V, Bool, Bool}`: A tuple containing:
@@ -412,14 +442,19 @@ function post_process_restricted_dd!(
     lp_vars             ::Vector{JuMP.VariableRef},
     lp_constraint_refs  ::Vector{JuMP.ConstraintRef},
     num_LPs_to_run      ::Int,
+    coefficient_matrix_int_cols  ::Matrix{V},
+    coefficient_matrix_rhs_vector::Vector{V},
+    path_buffer         ::Union{Vector{Z}, BitVector},
+    wrk_vec             ::Vector{V},
     timing_stats        ::TimingStats,
-    time_remaining      ::Union{Float64, Nothing} = nothing,
+    time_remaining      ::Union{Float64, Nothing} = nothing;
+    constraint_feasibility_tol::V
 ) where{Z<:Integer, V<:Real}
     fn_start = time()
 
     if num_cont_vars > 0
         # Finish the partial solutions with LPs
-        bkv, is_feasible, lps_exact = run_restricted_LPs!(bkv, bks_int, bks_cont, rdd, terminal_gap_buffer, qnode, first_layer_idx, num_int_vars, num_cont_vars, num_constraints, cont_inf_gap_ctrbtns, rough_bounds_cont_val, lp_sub_model, lp_vars, lp_constraint_refs, num_LPs_to_run, timing_stats, calculate_child_time_budget(time_remaining, fn_start))
+        bkv, is_feasible, lps_exact = run_restricted_LPs!(bkv, bks_int, bks_cont, rdd, terminal_gap_buffer, qnode, first_layer_idx, num_int_vars, num_cont_vars, num_constraints, cont_inf_gap_ctrbtns, rough_bounds_cont_val, lp_sub_model, lp_vars, lp_constraint_refs, num_LPs_to_run, coefficient_matrix_int_cols, coefficient_matrix_rhs_vector, path_buffer, wrk_vec, timing_stats, calculate_child_time_budget(time_remaining, fn_start); constraint_feasibility_tol = constraint_feasibility_tol)
 
         overall_exact = is_exact && lps_exact
         return V(bkv), is_feasible, overall_exact
@@ -431,19 +466,35 @@ function post_process_restricted_dd!(
         end
 
         terminal_layer = rdd.layers[num_int_vars]
-        idx = argmin(terminal_layer.ltrs)
 
-        # Reconstruct complete path (including queue node prefix if applicable)
-        reconstruct_path!(bks_int, rdd.layers, idx, qnode, first_layer_idx, num_int_vars)
+        # Accept the lowest-LTR terminal path that passes the feasibility check: rounding in the implied bounds can
+        # admit a slightly infeasible one. A path that fails is proven infeasible, so its LTR is set to Inf
+        # (the terminal LTRs are not needed afterwards) and the next-lowest is tried.
+        while true
+            idx = argmin(terminal_layer.ltrs)
+            terminal_layer.ltrs[idx] < bkv || return bkv, false, is_exact
 
-        return terminal_layer.ltrs[idx], true, is_exact
+            # Reconstruct complete path (including queue node prefix if applicable)
+            reconstruct_path!(path_buffer, rdd.layers, idx, qnode, first_layer_idx, num_int_vars)
+
+            if colwise_feasible!(coefficient_matrix_int_cols, path_buffer, coefficient_matrix_rhs_vector, wrk_vec, num_int_vars, num_constraints; atol = constraint_feasibility_tol)
+                bks_int .= path_buffer
+                return terminal_layer.ltrs[idx], true, is_exact
+            end
+            terminal_layer.ltrs[idx] = typemax(V)
+
+            if time_budget_exceeded(time_remaining, fn_start)
+                return bkv, false, false
+            end
+        end
     end
 end
 
 """
-    run_restricted_LPs!(bkv::U, bks_int::Union{Vector{Z}, BitVector}, bks_cont::Vector{U}, rdd::RestrictedDD, terminal_gap_buffer::Matrix{U}, qnode::Union{QueueNode, Nothing}, first_layer_idx::Int, num_int_vars::Int, num_cont_vars::Int, num_constraints::Int, cont_inf_gap_ctrbtns::Vector{U}, rough_bounds_cont_val::U, lp_sub_model::JuMP.Model, lp_vars::Vector{JuMP.VariableRef}, lp_constraint_refs::Vector{JuMP.ConstraintRef}, num_LPs_to_run::Int, timing_stats::TimingStats, time_remaining::Union{Float64, Nothing} = nothing) where {Z<:Integer, U<:Real}
+    run_restricted_LPs!(bkv::U, bks_int::Union{Vector{Z}, BitVector}, bks_cont::Vector{U}, rdd::RestrictedDD, terminal_gap_buffer::Matrix{U}, qnode::Union{QueueNode, Nothing}, first_layer_idx::Int, num_int_vars::Int, num_cont_vars::Int, num_constraints::Int, cont_inf_gap_ctrbtns::Vector{U}, rough_bounds_cont_val::U, lp_sub_model::JuMP.Model, lp_vars::Vector{JuMP.VariableRef}, lp_constraint_refs::Vector{JuMP.ConstraintRef}, num_LPs_to_run::Int, coefficient_matrix_int_cols::Matrix{U}, coefficient_matrix_rhs_vector::Vector{U}, path_buffer::Union{Vector{Z}, BitVector}, wrk_vec::Vector{U}, timing_stats::TimingStats, time_remaining::Union{Float64, Nothing} = nothing; constraint_feasibility_tol::U) where {Z<:Integer, U<:Real}
 
 Solves LP subproblems for terminal nodes in a restricted decision diagram to find feasible solutions to a MIP.
+A solution that would improve bkv is verified against the original constraints before it is accepted.
 
 # Arguments
 - `bkv::U`: Best known objective value to compare against for solution updates
@@ -462,8 +513,13 @@ Solves LP subproblems for terminal nodes in a restricted decision diagram to fin
 - `lp_vars::Vector{JuMP.VariableRef}`: References to continuous variable objects
 - `lp_constraint_refs::Vector{JuMP.ConstraintRef}`: References to constraint objects for RHS updates
 - `num_LPs_to_run::Int`: Maximum number of LP subproblems to solve
+- `coefficient_matrix_int_cols::Matrix{U}`: Coefficient matrix for integer variables (for verifying solutions)
+- `coefficient_matrix_rhs_vector::Vector{U}`: Right-hand side values for constraints (for verifying solutions)
+- `path_buffer::Union{Vector{Z}, BitVector}`: Preallocated path vector for candidate solutions
+- `wrk_vec::Vector{U}`: Preallocated working vector of length num_constraints
 - `timing_stats::TimingStats`: Timing statistics collector for performance profiling
 - `time_remaining::Union{Float64, Nothing}`: Time budget in seconds for this function (nothing if no time limit)
+- `constraint_feasibility_tol::U`: Amount by which an accepted solution may violate each constraint
 
 # Returns
 - `Tuple{U, Bool, Bool}`: A tuple containing:
@@ -488,8 +544,13 @@ function run_restricted_LPs!(
     lp_vars             ::Vector{JuMP.VariableRef},
     lp_constraint_refs  ::Vector{JuMP.ConstraintRef},
     num_LPs_to_run      ::Int,
+    coefficient_matrix_int_cols  ::Matrix{U},
+    coefficient_matrix_rhs_vector::Vector{U},
+    path_buffer         ::Union{Vector{Z}, BitVector},
+    wrk_vec             ::Vector{U},
     timing_stats        ::TimingStats,
-    time_remaining      ::Union{Float64, Nothing} = nothing,
+    time_remaining      ::Union{Float64, Nothing} = nothing;
+    constraint_feasibility_tol::U
 ) where{Z<:Integer, U<:Real}
     fn_start = time()
 
@@ -535,19 +596,43 @@ function run_restricted_LPs!(
         timing_stats.simplex_iterations += MOI.get(lp_sub_model, MOI.SimplexIterations())
 
         if termination_status(lp_sub_model) == MOI.OPTIMAL
-            is_feasible = true
             new_obj_value = objective_value(lp_sub_model) + ltrs[node_idx]
 
             if new_obj_value < bkv
-                bkv = new_obj_value
-
                 # Reconstruct complete integer solution path (including queue node prefix if applicable)
-                reconstruct_path!(bks_int, rdd.layers, node_idx, qnode, first_layer_idx, num_int_vars)
+                reconstruct_path!(path_buffer, rdd.layers, node_idx, qnode, first_layer_idx, num_int_vars)
 
-                # Extract continuous solution
-                @inbounds for var_idx in 1:num_cont_vars
-                    bks_cont[var_idx] = value(lp_vars[var_idx])
+                # Verify before accepting: the stored gaps are clamped, so the LP may have used a looser
+                # right-hand side than this path really leaves. If any row was loosened by more than the
+                # tolerance, re-solve with the exact right-hand side.
+                compute_path_rhs!(wrk_vec, path_buffer, coefficient_matrix_int_cols, coefficient_matrix_rhs_vector, num_int_vars, num_constraints)
+                rhs_was_loosened = false
+                @inbounds for row_idx in 1:num_constraints
+                    if wrk_vec[row_idx] < gap_matrix[row_idx, node_idx] - cont_inf_gap_ctrbtns[row_idx] - constraint_feasibility_tol
+                        rhs_was_loosened = true
+                        break
+                    end
                 end
+                lp_is_optimal = true
+                if rhs_was_loosened
+                    @time_operation timing_stats restricted_dd_lp_solver_call begin
+                        lp_is_optimal, cont_contribution = run_path_LP!(wrk_vec, num_constraints, lp_sub_model, lp_constraint_refs, timing_stats)
+                    end
+                    new_obj_value = cont_contribution + ltrs[node_idx]
+                end
+
+                if lp_is_optimal && new_obj_value < bkv
+                    is_feasible = true
+                    bkv = new_obj_value
+                    bks_int .= path_buffer
+
+                    # Extract continuous solution
+                    @inbounds for var_idx in 1:num_cont_vars
+                        bks_cont[var_idx] = value(lp_vars[var_idx])
+                    end
+                end
+            else
+                is_feasible = true
             end
         end
     end

@@ -451,9 +451,12 @@ function solve_mip(
             dd_ws.rough_bounds_int, rough_bounds_cont_val, infimum_gaps, cont_inf_gap_ctrbtns,
             dd_ws.coeff_times_val, dd_ws.gap_adjustments, dd_ws.inv_coeff, dd_ws.inv_obj_coeffs,
             lp_sub_model, lp_vars, lp_constraint_refs,
-            dd_ws.bin_counts, dd_ws.restricted_bins_matrix, dd_ws.cumulative_bins, 10000, num_LPs_to_run,
+            dd_ws.bin_counts, dd_ws.restricted_bins_matrix, dd_ws.cumulative_bins,
+            coefficient_matrix_int_cols, coefficient_matrix_rhs_vector, dd_ws.rel_path, dd_ws.wrk_vec,
+            10000, num_LPs_to_run,
             dd_ws.timing_stats,
-            calculate_child_time_budget(time_limit_seconds, time_limit_start)
+            calculate_child_time_budget(time_limit_seconds, time_limit_start);
+            constraint_feasibility_tol = numerical_precision(constraint_feasibility_tol)
         )
 
         if is_feasible_restricted
@@ -530,9 +533,12 @@ function solve_mip(
         dd_ws.rough_bounds_int, rough_bounds_cont_val, infimum_gaps, cont_inf_gap_ctrbtns,
         dd_ws.coeff_times_val, dd_ws.gap_adjustments, dd_ws.inv_coeff, dd_ws.inv_obj_coeffs,
         lp_sub_model, lp_vars, lp_constraint_refs,
-        dd_ws.bin_counts, dd_ws.restricted_bins_matrix, dd_ws.cumulative_bins, initial_dd_width, num_LPs_to_run,
+        dd_ws.bin_counts, dd_ws.restricted_bins_matrix, dd_ws.cumulative_bins,
+        coefficient_matrix_int_cols, coefficient_matrix_rhs_vector, dd_ws.rel_path, dd_ws.wrk_vec,
+        initial_dd_width, num_LPs_to_run,
         dd_ws.timing_stats,
-        calculate_child_time_budget(time_limit_seconds, time_limit_start)
+        calculate_child_time_budget(time_limit_seconds, time_limit_start);
+        constraint_feasibility_tol = numerical_precision(constraint_feasibility_tol)
     )
 
     if !suppress_all_prints
@@ -1263,9 +1269,12 @@ function process_queue_node!(
         dd_ws.rough_bounds_int, local_cont_bound, dd_ws.local_infimum_gaps, dd_ws.local_cont_inf_contr,
         dd_ws.coeff_times_val, dd_ws.gap_adjustments, dd_ws.inv_coeff, dd_ws.inv_obj_coeffs,
         lp_sub_model, lp_vars, lp_constraint_refs,
-        dd_ws.bin_counts, dd_ws.restricted_bins_matrix, dd_ws.cumulative_bins, restricted_w, num_LPs_to_run,
+        dd_ws.bin_counts, dd_ws.restricted_bins_matrix, dd_ws.cumulative_bins,
+        coefficient_matrix_int_cols, coefficient_matrix_rhs_vector, dd_ws.rel_path, dd_ws.wrk_vec,
+        restricted_w, num_LPs_to_run,
         dd_ws.timing_stats,
-        calculate_child_time_budget(time_remaining, function_start_time)
+        calculate_child_time_budget(time_remaining, function_start_time);
+        constraint_feasibility_tol = constraint_feasibility_tol
     )
 
     if debug_mode
