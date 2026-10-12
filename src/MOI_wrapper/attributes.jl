@@ -16,6 +16,7 @@ const SUPPORTED_RAW_ATTRIBUTES = Set([
     "timer_outputs",
     "custom_variable_order",
     "max_allowed_domain_size",
+    "constraint_feasibility_tol",
     "time_limit",
     "silent",
 ])
@@ -52,6 +53,8 @@ function MOI.get(optimizer::Optimizer, attr::MOI.RawOptimizerAttribute)
         return optimizer.custom_variable_order
     elseif name == "max_allowed_domain_size"
         return optimizer.max_allowed_domain_size
+    elseif name == "constraint_feasibility_tol"
+        return optimizer.constraint_feasibility_tol
     elseif name == "time_limit"
         return optimizer.time_limit
     elseif name == "silent"
@@ -102,6 +105,9 @@ function MOI.set(optimizer::Optimizer, attr::MOI.RawOptimizerAttribute, value)
     elseif name == "max_allowed_domain_size"
         value isa Real && isinteger(value) && value >= 1 || throw(ArgumentError("max_allowed_domain_size must be a positive integer"))
         optimizer.max_allowed_domain_size = Int(value)
+    elseif name == "constraint_feasibility_tol"
+        value isa Real && value >= 0 || throw(ArgumentError("constraint_feasibility_tol must be a non-negative number"))
+        optimizer.constraint_feasibility_tol = Float64(value)
     elseif name == "time_limit"
         value === nothing || (value isa Real && value >= 0) || throw(ArgumentError("time_limit must be a non-negative number or nothing"))
         optimizer.time_limit = value === nothing ? nothing : Float64(value)

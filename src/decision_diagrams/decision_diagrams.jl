@@ -11,7 +11,7 @@ function test_dds(;
     # Solver parameters
     relaxed_w::Int = 10000, restricted_w::Int = 10000, num_LPs_to_run = 100,
     solution_print::Bool = false,  bounds_print::Bool = true, suppress_all_prints::Bool = false, debug_mode::Bool = false,
-    numerical_precision::DataType = Float32,
+    numerical_precision::DataType = Float64,
     log_file_path::Union{String, Nothing} = nothing, wait_to_write_solutions::Bool = true,
     timer_outputs::Bool = false, parallel_processing::Bool = false,
 

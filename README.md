@@ -77,7 +77,7 @@ set_optimizer_attribute(model, MOI.Silent(), true)
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `parallel_processing` | Bool | true | Enable multi-threaded branch-and-bound. Run Julia with `-t N` for N threads. |
-| `numerical_precision` | DataType | Float32 | Float precision for calculations. Use Float64 if numerical issues arise. |
+| `numerical_precision` | DataType | Float64 | Float precision for calculations. Float32 uses less memory but can give wrong results when rounding error exceeds the solver's tolerances. |
 
 ### Output Control
 

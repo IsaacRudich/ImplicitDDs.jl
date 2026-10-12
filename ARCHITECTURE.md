@@ -23,7 +23,7 @@ result = ImplicitDDs.solve_mip(
     relaxed_w = 1000,      # Width limit for relaxed DDs
     restricted_w = 1000,    # Width limit for restricted DDs
     parallel_processing = true,
-    time_limit = nothing    # Optional time limit in seconds
+    time_limit = nothing    # Optional time limit in minutes
 )
 
 # Access results
@@ -71,9 +71,9 @@ include("src/ImplicitDDs.jl")  # Compiles and runs example
 - `solution_print::Bool`: Print solutions when found (default: false)
 - `bounds_print::Bool`: Print bound improvements (default: true)
 - `suppress_all_prints::Bool`: Suppress all console output (default: false)
-- `numerical_precision::DataType`: Float precision for calculations (default: Float32)
+- `numerical_precision::DataType`: Float precision for calculations (default: Float64)
 - `log_file_path::Union{String, Nothing}`: Path for JSON logging (default: nothing)
-- `time_limit::Union{<:Real, Nothing}`: Time limit in seconds (default: nothing)
+- `time_limit::Union{<:Real, Nothing}`: Time limit in minutes (default: nothing)
 
 ### Return Values
 
@@ -556,8 +556,8 @@ Brief one-line description ending with a period.
 
 **Numerical Precision**:
 
-- `Float32`: Faster, less memory, sufficient for most problems
-- `Float64`: Use if numerical issues arise, no known examples yet
+- `Float64` (default): Rounding error stays well below the solver's tolerances
+- `Float32`: Faster, less memory, but rounding error can exceed the solver's tolerances (e.g. `0.3x ≤ 2.1` with x integer gives x ≤ 6 instead of 7)
 
 ## Dependencies
 

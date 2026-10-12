@@ -180,9 +180,10 @@ function fbbt_bound_tightening!(
                     infimum_gaps[row_idx] += bound_change
                     cont_inf_gap_ctrbtns[row_idx] += bound_change
                 end
+                improvement = ubs_cont[var_idx] - current_bound_upper
                 ubs_cont[var_idx] = current_bound_upper
                 # Only set iter_bounds_improved if improvement exceeds tolerance
-                if (ubs_cont[var_idx] - current_bound_upper) > tolerance
+                if improvement > tolerance
                     iter_bounds_improved = true
                 end
             end
@@ -204,9 +205,10 @@ function fbbt_bound_tightening!(
                     infimum_gaps[row_idx] += bound_change
                     cont_inf_gap_ctrbtns[row_idx] += bound_change
                 end
+                improvement = current_bound_lower - lbs_cont[var_idx]
                 lbs_cont[var_idx] = current_bound_lower
                 # Only set iter_bounds_improved if improvement exceeds tolerance
-                if (current_bound_lower - lbs_cont[var_idx]) > tolerance
+                if improvement > tolerance
                     iter_bounds_improved = true
                 end
             end

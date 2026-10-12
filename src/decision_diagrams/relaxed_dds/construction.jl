@@ -345,7 +345,7 @@ end
         queue_nodes::Vector{QueueNode{Z,T}}, fc_new_nodes::Vector{QueueNode{Z,T}},
         lp_sub_model::JuMP.Model,
         lp_vars::Vector{JuMP.VariableRef}, lp_constraint_refs::Vector{JuMP.ConstraintRef},
-        w::Int, timing_stats::TimingStats; debug_mode::Bool = false, time_remaining::Union{Float64, Nothing} = nothing
+        w::Int, timing_stats::TimingStats; debug_mode::Bool = false, time_remaining::Union{Float64, Nothing} = nothing, constraint_feasibility_tol::T
     ) where {Z<:Integer, T<:Real}
 
 Executes the complete relaxed decision diagram solution bounding process for mixed-integer programming problems.
@@ -428,6 +428,7 @@ Integrates three core phases to solve mixed-integer programs via relaxed decisio
 - `timing_stats::TimingStats`: Timing statistics tracker for relaxed DD operations
 - `debug_mode::Bool`: Enable debug output (default: false)
 - `time_remaining::Union{Float64, Nothing}`: Time budget in seconds for this function (nothing if no time limit)
+- `constraint_feasibility_tol::T`: Amount by which an accepted solution may violate each constraint
 """
 function setup_run_process_relaxed_dd!(
     # problem description
@@ -488,7 +489,8 @@ function setup_run_process_relaxed_dd!(
     w::Int,
     timing_stats::TimingStats;
     debug_mode::Bool = false,
-    time_remaining::Union{Float64, Nothing} = nothing
+    time_remaining::Union{Float64, Nothing} = nothing,
+    constraint_feasibility_tol::T
 ) where {Z<:Integer, T<:Real}
     fn_start = time()
     @time_operation timing_stats relaxed_dd begin
@@ -592,7 +594,8 @@ function setup_run_process_relaxed_dd!(
                 lp_constraint_refs,
                 timing_stats,
                 debug_mode = debug_mode,
-                time_remaining = calculate_child_time_budget(time_remaining, fn_start)
+                time_remaining = calculate_child_time_budget(time_remaining, fn_start),
+                constraint_feasibility_tol = constraint_feasibility_tol
             )
         end
     end
@@ -625,7 +628,7 @@ end
         bins_matrix::Matrix{<:Integer},
         queue_nodes::Vector{QueueNode{Z,T}}, fc_new_nodes::Vector{QueueNode{Z,T}},
         lp_sub_model, lp_vars, lp_constraint_refs,
-        w, timing_stats::TimingStats; debug_mode::Bool = false, time_remaining::Union{Float64, Nothing} = nothing
+        w, timing_stats::TimingStats; debug_mode::Bool = false, time_remaining::Union{Float64, Nothing} = nothing, constraint_feasibility_tol::T
     ) where {Z<:Integer, T<:Real}
 
 Executes the complete relaxed decision diagram solution bounding process for mixed-integer programming problems.
@@ -697,6 +700,7 @@ from that starting point, and extracts bounds and solution improvements.
 - `timing_stats::TimingStats`: Timing statistics tracker for relaxed DD operations
 - `debug_mode::Bool`: Enable debug output (default: false)
 - `time_remaining::Union{Float64, Nothing}`: Time budget in seconds for this function (nothing if no time limit)
+- `constraint_feasibility_tol::T`: Amount by which an accepted solution may violate each constraint
 
 # Returns
 - `Tuple{T, Bool, NodeLayer}`: A tuple containing:
@@ -769,7 +773,8 @@ function setup_run_process_relaxed_dd!(
     w,
     timing_stats::TimingStats;
     debug_mode::Bool = false,
-    time_remaining::Union{Float64, Nothing} = nothing
+    time_remaining::Union{Float64, Nothing} = nothing,
+    constraint_feasibility_tol::T
 ) where {Z<:Integer, T<:Real}
     fn_start = time()
     @time_operation timing_stats relaxed_dd begin
@@ -870,7 +875,8 @@ function setup_run_process_relaxed_dd!(
                 lp_constraint_refs,
                 timing_stats,
                 debug_mode = debug_mode,
-                time_remaining = calculate_child_time_budget(time_remaining, fn_start)
+                time_remaining = calculate_child_time_budget(time_remaining, fn_start),
+                constraint_feasibility_tol = constraint_feasibility_tol
             )
         end
     end

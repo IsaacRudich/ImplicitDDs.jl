@@ -33,9 +33,9 @@ to prove optimality.
 
 - `parallel_processing::Bool = true`: Use multi-threading for branch-and-bound
 
-- `numerical_precision::DataType = Float32`: Precision for all floats used in the solver.
-  - **Float32**: Use for most problems, if precision isn't critical consider lower
-  - **Float64**: Slower, more memory (~8 bytes/float), but higher numerical accuracy
+- `numerical_precision::DataType = Float64`: Precision for all floats used in the solver.
+  - **Float64**: Recommended; rounding error stays well below the solver's tolerances
+  - **Float32**: Less memory and faster, but rounding error can exceed the solver's tolerances on moderately sized values and change results
   - **Important**: Must match the precision used in `precompile_solver()` to avoid JIT compilation overhead
 
 ## Output Control
@@ -90,6 +90,9 @@ to prove optimality.
   - **Purpose**: DD widths must be at least the largest domain size, so memory required scales with width × domain size, and large domains exhaust memory
   - **Behavior**: Checked after OBBT; the solver throws an error if any variable's domain is larger
   - **How to choose**: Can be raised, but we don't recommend it
+
+- `constraint_feasibility_tol::Real = 1e-6`: Amount by which a returned solution may violate each constraint
+  - **Behavior**: Candidate solutions are checked against the original constraints and rejected if any constraint is violated by more than this
 
 # Returns
 
@@ -161,13 +164,14 @@ function solve_mip(
     bounds_print::Bool = true,
     suppress_all_prints::Bool = false,
     debug_mode::Bool = false,
-    numerical_precision::DataType = Float32,
+    numerical_precision::DataType = Float64,
     log_file_path::Union{String, Nothing} = nothing,
     wait_to_write_solutions::Bool = false,
     timer_outputs::Bool = false,
     time_limit::Union{<:Real, Nothing} = nothing,
     custom_variable_order::Union{Vector{VariableRef}, Nothing} = nothing,
     max_allowed_domain_size::Int = 10000,
+    constraint_feasibility_tol::Real = 1e-6,
     _force_parallel_precompile::Bool = false
 )
 
@@ -644,7 +648,8 @@ function solve_mip(
         lp_sub_model, lp_vars, lp_constraint_refs,
         initial_dd_width, dd_ws.timing_stats;
         debug_mode = debug_mode,
-        time_remaining = calculate_child_time_budget(time_limit_seconds, time_limit_start)
+        time_remaining = calculate_child_time_budget(time_limit_seconds, time_limit_start),
+        constraint_feasibility_tol = numerical_precision(constraint_feasibility_tol)
     )
 
     if !suppress_all_prints
@@ -760,7 +765,7 @@ function solve_mip(
                 log_bounds(best_bound, bkv, sense_multiplier, length(dd_ws.bnb_queue), bounds_print, suppress_all_prints, runtime_log_file_path,  solve_start, true_start,  logs, wait_to_write_solutions)
             end
 
-            temp_bkv, overhead_time, dd_time_during = process_queue_node!(next_node, dd_ws, int_obj_coeffs, coefficient_matrix_int_cols, coefficient_matrix_cont_cols, coefficient_matrix_rhs_vector, int_var_to_pos_rows, int_var_to_neg_rows, int_var_to_zero_rows, cont_var_to_pos_rows, cont_var_to_neg_rows, lbs_int, ubs_int, lbs_cont, ubs_cont, cont_obj_coeffs, num_int_vars, num_cont_vars, num_constraints, infimum_gaps, cont_inf_gap_ctrbtns, bkv, lp_sub_model, lp_vars, lp_constraint_refs, restricted_w, relaxed_w, num_LPs_to_run, debug_mode, inverse_order, sense_multiplier, solve_start, true_start, calculate_child_time_budget(time_limit_seconds, time_limit_start))
+            temp_bkv, overhead_time, dd_time_during = process_queue_node!(next_node, dd_ws, int_obj_coeffs, coefficient_matrix_int_cols, coefficient_matrix_cont_cols, coefficient_matrix_rhs_vector, int_var_to_pos_rows, int_var_to_neg_rows, int_var_to_zero_rows, cont_var_to_pos_rows, cont_var_to_neg_rows, lbs_int, ubs_int, lbs_cont, ubs_cont, cont_obj_coeffs, num_int_vars, num_cont_vars, num_constraints, infimum_gaps, cont_inf_gap_ctrbtns, bkv, lp_sub_model, lp_vars, lp_constraint_refs, restricted_w, relaxed_w, num_LPs_to_run, debug_mode, inverse_order, sense_multiplier, solve_start, true_start, calculate_child_time_budget(time_limit_seconds, time_limit_start); constraint_feasibility_tol = numerical_precision(constraint_feasibility_tol))
             node_count += 1
             double_counted_time += dd_time_during
 
@@ -805,7 +810,8 @@ function solve_mip(
                         infimum_gaps, cont_inf_gap_ctrbtns,
                         local_lp_model, local_lp_vars, local_lp_constraints,
                         restricted_w, relaxed_w, num_LPs_to_run, debug_mode,
-                        inverse_order, sense_multiplier, solve_start, true_start
+                        inverse_order, sense_multiplier, solve_start, true_start;
+                        constraint_feasibility_tol = numerical_precision(constraint_feasibility_tol)
                     )
                 catch e
                     println("╔═══════════════════════════════════════════════════════════")
@@ -1054,7 +1060,9 @@ function worker_loop(
     #settings
     restricted_w::Int, relaxed_w::Int, num_LPs_to_run::Int, debug_mode::Bool,
     #logging
-    inverse_order::Vector{Int}, sense_multiplier::Int, solve_start::Float64, true_start::Float64
+    inverse_order::Vector{Int}, sense_multiplier::Int, solve_start::Float64, true_start::Float64;
+    #settings
+    constraint_feasibility_tol::T
 ) where {Z<:Integer, T<:Real}
 
     while true
@@ -1092,7 +1100,8 @@ function worker_loop(
             lp_sub_model, lp_vars, lp_constraint_refs,
             restricted_w, relaxed_w, num_LPs_to_run, debug_mode,
             inverse_order, sense_multiplier, solve_start, true_start,
-            time_remaining
+            time_remaining;
+            constraint_feasibility_tol = constraint_feasibility_tol
         )
 
         # Extract newly added nodes from worker's queue
@@ -1151,6 +1160,7 @@ Process a single queue node in the branch-and-bound loop by running restricted a
 - `solve_start::Float64`: Timestamp when solve phase started
 - `true_start::Float64`: Timestamp when overall execution started
 - `time_remaining::Union{Float64, Nothing}`: Time budget in seconds (nothing if no time limit)
+- `constraint_feasibility_tol::T`: Amount by which an accepted solution may violate each constraint
 
 # Returns
 - `Tuple{T, Float64, Float64}`: A tuple containing:
@@ -1188,7 +1198,8 @@ function process_queue_node!(
     restricted_w::Int, relaxed_w::Int, num_LPs_to_run::Int, debug_mode::Bool,
     #logging
     inverse_order::Vector{Int}, sense_multiplier::Int, solve_start::Float64, true_start::Float64,
-    time_remaining::Union{Float64, Nothing} = nothing
+    time_remaining::Union{Float64, Nothing} = nothing;
+    constraint_feasibility_tol::T
 ) where {Z<:Integer, T<:Real}
     function_start_time = time()
     dd_time_before = dd_ws.timing_stats.restricted_dd_total + dd_ws.timing_stats.relaxed_dd_total
@@ -1293,7 +1304,8 @@ function process_queue_node!(
         lp_sub_model, lp_vars, lp_constraint_refs,
         relaxed_w, dd_ws.timing_stats;
         debug_mode = debug_mode,
-        time_remaining = calculate_child_time_budget(time_remaining, function_start_time)
+        time_remaining = calculate_child_time_budget(time_remaining, function_start_time),
+        constraint_feasibility_tol = constraint_feasibility_tol
     )
 
     if temp_bkv < bkv

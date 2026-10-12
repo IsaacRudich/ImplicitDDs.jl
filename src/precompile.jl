@@ -59,7 +59,7 @@ end
 # Manual precompilation function (existing)
 # =============================================================================
 """
-    precompile_solver(; precision::DataType = Float32, biggest_int_domain::Int = 2)
+    precompile_solver(; precision::DataType = Float64, biggest_int_domain::Int = 2)
 
 Manually precompile the solver for a specific integer type and precision.
 
@@ -71,7 +71,7 @@ type other than Float32 or Float64.
 
 # Arguments
 
-- `precision::DataType = Float32`: Numerical precision for continuous variables and objective values
+- `precision::DataType = Float64`: Numerical precision for continuous variables and objective values
 
 - `biggest_int_domain::Int = 2`: Size of the largest integer variable domain you expect
   - **biggest_int_domain == 2**: Bool/BitVector path (binary variables {0, 1})
@@ -81,7 +81,7 @@ type other than Float32 or Float64.
 
 Compiles the parallel code path if multiple threads are available, otherwise the serial path.
 """
-function precompile_solver(;precision::DataType = Float32, biggest_int_domain::Int = 2)
+function precompile_solver(;precision::DataType = Float64, biggest_int_domain::Int = 2)
     if biggest_int_domain == 2
         model = generate_random_mip(
             n_int = 2, n_cont = 1, m = 1,

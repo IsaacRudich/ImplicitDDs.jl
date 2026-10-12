@@ -20,7 +20,7 @@ COMMENTS UP TO DATE
         lbs_int::Union{Vector{Z}, BitVector}, ubs_int::Union{Vector{Z}, BitVector},
         lp_sub_model::JuMP.Model, lp_vars::Vector{JuMP.VariableRef},
         lp_constraint_refs::Vector{JuMP.ConstraintRef},
-        timing_stats::TimingStats; debug_mode::Bool = false, time_remaining::Union{Float64, Nothing} = nothing
+        timing_stats::TimingStats; debug_mode::Bool = false, time_remaining::Union{Float64, Nothing} = nothing, constraint_feasibility_tol::V
     ) where {Z<:Integer, V<:Real}
 
 Processes a relaxed decision diagram to extract bounds, find optimal solutions, and generate branching nodes
@@ -62,6 +62,7 @@ Processes a relaxed decision diagram to extract bounds, find optimal solutions, 
 - `timing_stats::TimingStats`: Timing statistics tracker for relaxed DD operations
 - `debug_mode::Bool`: Enable debug output (default: false)
 - `time_remaining::Union{Float64, Nothing}`: Time budget in seconds for this function (nothing if no time limit)
+- `constraint_feasibility_tol::V`: Amount by which an accepted solution may violate each constraint
 
 # Returns
 - `Tuple{V, V, Bool, Bool}`: A tuple containing:
@@ -115,7 +116,8 @@ Processes a relaxed decision diagram to extract bounds, find optimal solutions, 
     lp_constraint_refs              ::Vector{JuMP.ConstraintRef},
     timing_stats::TimingStats;
     debug_mode                      ::Bool = false,
-    time_remaining                  ::Union{Float64, Nothing} = nothing
+    time_remaining                  ::Union{Float64, Nothing} = nothing,
+    constraint_feasibility_tol      ::V
 ) where {Z<:Integer, V<:Real}
     fn_start = time()
 
@@ -156,7 +158,7 @@ Processes a relaxed decision diagram to extract bounds, find optimal solutions, 
         #get the relaxed path through the diagram
         backtrack_path!(rel_path, node_matrix, ltr_matrix, lb_matrix, ub_matrix, num_int_vars, cur_idx, first_layer, preceeding_path)
         #check if rel_path is feasible, return if yes
-        is_feasible = colwise_feasible!(coefficient_matrix_int_cols, rel_path, coefficient_matrix_rhs_vector, feasibility_accumulator, num_int_vars, num_constraints)
+        is_feasible = colwise_feasible!(coefficient_matrix_int_cols, rel_path, coefficient_matrix_rhs_vector, feasibility_accumulator, num_int_vars, num_constraints; atol = constraint_feasibility_tol)
 
         # println("Rel Path: ", rel_path, " Feasible: ", is_feasible)
         if is_feasible && lowest_ltr < bkv
@@ -209,8 +211,9 @@ Processes a relaxed decision diagram to extract bounds, find optimal solutions, 
             lp_sub_model, lp_vars, lp_constraint_refs,
             coefficient_matrix_int_cols, coefficient_matrix_rhs_vector,
             int_var_to_pos_rows, int_var_to_neg_rows,
-            lbs_int, ubs_int, wrk_vec, timing_stats;
-            time_remaining = calculate_child_time_budget(time_remaining, fn_start)
+            lbs_int, ubs_int, wrk_vec, rel_path, timing_stats;
+            time_remaining = calculate_child_time_budget(time_remaining, fn_start),
+            constraint_feasibility_tol = constraint_feasibility_tol
         )
     end
 
@@ -584,6 +587,83 @@ end
 
 
 """
+    compute_path_rhs!(rhs_buffer::Vector{U}, path::Union{Vector{Z}, BitVector}, coefficient_matrix_int_cols::Matrix{U}, coefficient_matrix_rhs_vector::Vector{U}, num_int_vars::Int, num_constraints::Int) where {Z<:Integer, U<:Real}
+
+Computes the exact right-hand side of the continuous subproblem for a complete integer path, `b - A_int * path`.
+
+The gaps stored in the DD are clamped to be non-negative, so the right-hand side derived from them can be looser
+than this one when the integer part slightly violates a constraint.
+
+# Arguments
+- `rhs_buffer::Vector{U}`: Preallocated working vector of length num_constraints, overwritten with the right-hand side
+- `path::Union{Vector{Z}, BitVector}`: Complete integer path (length num_int_vars)
+- `coefficient_matrix_int_cols::Matrix{U}`: Coefficient matrix for integer variables
+- `coefficient_matrix_rhs_vector::Vector{U}`: Right-hand side values for constraints
+- `num_int_vars::Int`: Number of integer variables
+- `num_constraints::Int`: Number of constraints
+"""
+function compute_path_rhs!(
+    rhs_buffer                   ::Vector{U},
+    path                         ::Union{Vector{Z}, BitVector},
+    coefficient_matrix_int_cols  ::Matrix{U},
+    coefficient_matrix_rhs_vector::Vector{U},
+    num_int_vars                 ::Int,
+    num_constraints              ::Int
+) where {Z<:Integer, U<:Real}
+    # Accumulate b - A_int * path one column at a time
+    rhs_buffer .= coefficient_matrix_rhs_vector
+    @inbounds for j in 1:num_int_vars
+        val = path[j]
+        val == 0 && continue
+        col = view(coefficient_matrix_int_cols, :, j)
+        @simd for i in 1:num_constraints
+            rhs_buffer[i] -= col[i] * val
+        end
+    end
+end
+
+
+"""
+    run_path_LP!(rhs::Vector{U}, num_constraints::Int, lp_sub_model::JuMP.Model, lp_constraint_refs::Vector{JuMP.ConstraintRef}, timing_stats::TimingStats) where {U<:Real}
+
+Solves the continuous subproblem with the given right-hand side, typically the exact one from `compute_path_rhs!`.
+
+# Arguments
+- `rhs::Vector{U}`: Right-hand side for each constraint
+- `num_constraints::Int`: Number of constraints
+- `lp_sub_model::JuMP.Model`: LP model for continuous variables
+- `lp_constraint_refs::Vector{JuMP.ConstraintRef}`: References to LP constraint objects
+- `timing_stats::TimingStats`: Timing statistics tracker for relaxed DD operations
+
+# Returns
+- `Tuple{Bool, U}`: A tuple containing:
+  1. `Bool`: True if the LP was solved to optimality, false otherwise
+  2. `U`: Objective contribution from continuous variables (zero if not optimal)
+"""
+function run_path_LP!(
+    rhs                 ::Vector{U},
+    num_constraints     ::Int,
+    lp_sub_model        ::JuMP.Model,
+    lp_constraint_refs  ::Vector{JuMP.ConstraintRef},
+    timing_stats        ::TimingStats
+) where {U<:Real}
+    @inbounds for row_idx in 1:num_constraints
+        set_normalized_rhs(lp_constraint_refs[row_idx], rhs[row_idx])
+    end
+
+    @time_operation timing_stats post_relaxed_dd_true_LP begin
+        optimize!(lp_sub_model)
+    end
+    timing_stats.simplex_iterations += MOI.get(lp_sub_model, MOI.SimplexIterations())
+
+    if termination_status(lp_sub_model) == MOI.OPTIMAL
+        return true, U(objective_value(lp_sub_model))
+    end
+    return false, zero(U)
+end
+
+
+"""
     handle_exact_terminal_nodes!(
         ltr_matrix::Matrix{U},
         relaxed_dd::Vector{NodeLayer{Z}}, cur_layr_idx::Int, first_layer::Int,
@@ -594,13 +674,16 @@ end
         lp_sub_model::JuMP.Model, lp_vars::Vector{JuMP.VariableRef},
         lp_constraint_refs::Vector{JuMP.ConstraintRef},
         num_cont_vars::Int, num_constraints::Int,
+        num_int_vars::Int, coefficient_matrix_int_cols::Matrix{U}, coefficient_matrix_rhs_vector::Vector{U},
+        rel_path::Union{Vector{Z}, BitVector}, wrk_vec::Vector{U},
         timing_stats::TimingStats;
-        time_remaining::Union{Float64, Nothing} = nothing
+        time_remaining::Union{Float64, Nothing} = nothing, constraint_feasibility_tol::U
     ) where {Z<:Integer, U<:Real}
 
 Processes all exact terminal nodes in a layer by solving continuous subproblems.
 For integer programs, finds the node with minimum LTR. For mixed-integer programs,
 solves an LP for each terminal node to determine the best complete solution.
+Each candidate path is checked against the original constraints before it is accepted.
 
 # Arguments
 - `ltr_matrix::Matrix{U}`: Length-to-root matrix containing costs from root to nodes
@@ -620,8 +703,14 @@ solves an LP for each terminal node to determine the best complete solution.
 - `lp_constraint_refs::Vector{JuMP.ConstraintRef}`: References to LP constraint objects
 - `num_cont_vars::Int`: Number of continuous variables
 - `num_constraints::Int`: Number of constraints
+- `num_int_vars::Int`: Number of integer variables
+- `coefficient_matrix_int_cols::Matrix{U}`: Coefficient matrix for integer variables (for checking terminal paths)
+- `coefficient_matrix_rhs_vector::Vector{U}`: Right-hand side values for constraints (for checking terminal paths)
+- `rel_path::Union{Vector{Z}, BitVector}`: Preallocated path vector for candidate terminal paths
+- `wrk_vec::Vector{U}`: Preallocated working vector of length num_constraints for the feasibility check
 - `timing_stats::TimingStats`: Timing statistics tracker for relaxed DD operations
 - `time_remaining::Union{Float64, Nothing}`: Time budget in seconds (nothing if no time limit)
+- `constraint_feasibility_tol::U`: Amount by which an accepted path may violate each constraint
 
 # Returns
 - `Tuple{U, Bool, Bool}`: A tuple containing:
@@ -647,8 +736,14 @@ function handle_exact_terminal_nodes!(
     lp_constraint_refs          ::Vector{JuMP.ConstraintRef},
     num_cont_vars               ::Int,
     num_constraints             ::Int,
+    num_int_vars                ::Int,
+    coefficient_matrix_int_cols ::Matrix{U},
+    coefficient_matrix_rhs_vector::Vector{U},
+    rel_path                    ::Union{Vector{Z}, BitVector},
+    wrk_vec                     ::Vector{U},
     timing_stats::TimingStats;
-    time_remaining::Union{Float64, Nothing} = nothing
+    time_remaining::Union{Float64, Nothing} = nothing,
+    constraint_feasibility_tol::U
 ) where {Z<:Integer, U<:Real}
     @time_operation timing_stats post_relaxed_dd_handle_exact_terminals begin
         fn_start = time()
@@ -660,13 +755,28 @@ function handle_exact_terminal_nodes!(
         ltr_vals = @view ltr_matrix[:, cur_layr_idx]
 
         if num_cont_vars == 0
-            # Integer program: find node with minimum LTR
-            best_ltr, best_idx = findmin(@view ltr_vals[1:layer_size])
+            # Integer program: accept the lowest-LTR terminal path that passes the feasibility check.
+            # Each terminal node of an exact DD is one complete path, but rounding in the implied bounds
+            # can admit a slightly infeasible one, so a path is checked before it is accepted.
+            # A path that fails is proven infeasible, so its node is deactivated and the next-lowest is tried.
+            active_col = current_layer.active
+            while true
+                best_ltr, best_idx = findmin(node_idx -> active_col[node_idx] ? ltr_vals[node_idx] : typemax(U), 1:layer_size)
+                best_ltr < bkv || break
 
-            if best_ltr < bkv
-                backtrack_exact_path!(bks_int, cur_layr_idx, best_idx, relaxed_dd, first_layer, preceeding_path)
-                bkv = best_ltr
-                updated_solution = true
+                backtrack_exact_path!(rel_path, cur_layr_idx, best_idx, relaxed_dd, first_layer, preceeding_path)
+                if colwise_feasible!(coefficient_matrix_int_cols, rel_path, coefficient_matrix_rhs_vector, wrk_vec, num_int_vars, num_constraints; atol = constraint_feasibility_tol)
+                    bks_int .= rel_path
+                    bkv = best_ltr
+                    updated_solution = true
+                    break
+                end
+                active_col[best_idx] = false
+
+                if time_budget_exceeded(time_remaining, fn_start)
+                    timed_out = true
+                    break
+                end
             end
 
         else
@@ -710,10 +820,31 @@ function handle_exact_terminal_nodes!(
                         total_obj_value = node_ltr + cont_contribution
 
                         if total_obj_value < bkv
+                            # Verify before accepting: the stored gaps are clamped, so the LP may have used a looser
+                            # right-hand side than this path really leaves. If any row was loosened by more than the
+                            # tolerance, re-solve with the exact right-hand side.
+                            backtrack_exact_path!(rel_path, cur_layr_idx, node_idx, relaxed_dd, first_layer, preceeding_path)
+                            compute_path_rhs!(wrk_vec, rel_path, coefficient_matrix_int_cols, coefficient_matrix_rhs_vector, num_int_vars, num_constraints)
+                            rhs_was_loosened = false
+                            @inbounds for row_idx in 1:num_constraints
+                                if wrk_vec[row_idx] < inf_gap_col[row_idx] - cont_inf_gap_ctrbtns[row_idx] - constraint_feasibility_tol
+                                    rhs_was_loosened = true
+                                    break
+                                end
+                            end
+                            if rhs_was_loosened
+                                @time_operation timing_stats post_relaxed_dd_potential_low_level_LP begin
+                                    is_feasible, cont_contribution = run_path_LP!(wrk_vec, num_constraints, lp_sub_model, lp_constraint_refs, timing_stats)
+                                end
+                                total_obj_value = node_ltr + cont_contribution
+                            end
+                        end
+
+                        if is_feasible && total_obj_value < bkv
                             # Update best known solution with complete mixed-integer solution
                             bkv = total_obj_value
 
-                            backtrack_exact_path!(bks_int, cur_layr_idx, node_idx, relaxed_dd, first_layer, preceeding_path)
+                            bks_int .= rel_path
 
                             @inbounds for var_idx in 1:num_cont_vars
                                 bks_cont[var_idx] = value(lp_vars[var_idx])
@@ -746,8 +877,8 @@ end
         coefficient_matrix_int_cols::Matrix{U}, coefficient_matrix_rhs_vector::Vector{U},
         int_var_to_pos_rows::Dict{Int, Vector{Int}}, int_var_to_neg_rows::Dict{Int, Vector{Int}},
         lbs_int::Union{Vector{Z}, BitVector}, ubs_int::Union{Vector{Z}, BitVector},
-        wrk_vec::Vector{U}, timing_stats::TimingStats;
-        time_remaining::Union{Float64, Nothing} = nothing
+        wrk_vec::Vector{U}, rel_path::Union{Vector{Z}, BitVector}, timing_stats::TimingStats;
+        time_remaining::Union{Float64, Nothing} = nothing, constraint_feasibility_tol::U
     ) where {Z<:Integer, U<:Real}
 
 Processes nodes in the last exact layer for branch-and-bound queue generation.
@@ -785,8 +916,10 @@ layer, as each represents a unique exact path from the root.
 - `lbs_int::Union{Vector{Z}, BitVector}`: Lower bounds for integer variables
 - `ubs_int::Union{Vector{Z}, BitVector}`: Upper bounds for integer variables
 - `wrk_vec::Vector{U}`: Preallocated working vector for gap computations
+- `rel_path::Union{Vector{Z}, BitVector}`: Preallocated path vector for checking exact terminal paths
 - `timing_stats::TimingStats`: Timing statistics tracker for relaxed DD operations
 - `time_remaining::Union{Float64, Nothing}`: Time budget in seconds (nothing if no time limit)
+- `constraint_feasibility_tol::U`: Amount by which an accepted path may violate each constraint
 
 # Returns
 - `Tuple{U, Bool, Bool}`: A tuple containing:
@@ -824,8 +957,10 @@ function process_last_exact_layer!(
     lbs_int                 ::Union{Vector{Z}, BitVector},
     ubs_int                 ::Union{Vector{Z}, BitVector},
     wrk_vec                 ::Vector{U},
+    rel_path                ::Union{Vector{Z}, BitVector},
     timing_stats::TimingStats;
-    time_remaining::Union{Float64, Nothing} = nothing
+    time_remaining::Union{Float64, Nothing} = nothing,
+    constraint_feasibility_tol::U
 ) where {Z<:Integer, U<:Real}
     fn_start = time()
     empty!(new_nodes)
@@ -853,8 +988,14 @@ function process_last_exact_layer!(
             lp_constraint_refs,
             num_cont_vars,
             num_constraints,
+            num_int_vars,
+            coefficient_matrix_int_cols,
+            coefficient_matrix_rhs_vector,
+            rel_path,
+            wrk_vec,
             timing_stats;
-            time_remaining = calculate_child_time_budget(time_remaining, fn_start)
+            time_remaining = calculate_child_time_budget(time_remaining, fn_start),
+            constraint_feasibility_tol = constraint_feasibility_tol
         )
 
         return bkv, updated_solution, timed_out

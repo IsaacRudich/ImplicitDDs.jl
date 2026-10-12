@@ -30,7 +30,7 @@ ImplicitDDs solver optimizer for MathOptInterface.
 | `restricted_w` | Int | 10000 | Width limit for restricted DDs |
 | `num_LPs_to_run` | Int | 10 | Max LP subproblems per restricted DD |
 | `parallel_processing` | Bool | true | Enable multi-threading |
-| `numerical_precision` | DataType | Float32 | Float precision |
+| `numerical_precision` | DataType | Float64 | Float precision |
 | `debug_mode` | Bool | false | Verbose debug output |
 | `log_file_path` | String/Nothing | nothing | JSON log file path |
 | `bounds_print` | Bool | true | Print bound improvements |
@@ -39,6 +39,7 @@ ImplicitDDs solver optimizer for MathOptInterface.
 | `timer_outputs` | Bool | false | Detailed timing breakdown |
 | `custom_variable_order` | Vector{MOI.VariableIndex}/Nothing | nothing | Custom variable ordering |
 | `max_allowed_domain_size` | Int | 10000 | Largest integer variable domain (ub - lb + 1) accepted |
+| `constraint_feasibility_tol` | Float64 | 1e-6 | Amount by which a returned solution may violate each constraint |
 | `MOI.Silent()` | Bool | false | Suppress all output |
 | `MOI.TimeLimitSec()` | Float64/Nothing | nothing | Time limit in seconds |
 
@@ -78,6 +79,7 @@ mutable struct Optimizer <: MOI.AbstractOptimizer
     timer_outputs::Bool
     custom_variable_order::Union{Vector{MOI.VariableIndex}, Nothing}
     max_allowed_domain_size::Int
+    constraint_feasibility_tol::Float64
 
     # Standard MOI attributes
     time_limit::Union{Float64, Nothing}  # seconds (converted to minutes for solve_mip)
@@ -118,7 +120,7 @@ function Optimizer()
         10000,          # restricted_w
         10,             # num_LPs_to_run
         true,           # parallel_processing
-        Float32,        # numerical_precision
+        Float64,        # numerical_precision
         false,          # debug_mode
         nothing,        # log_file_path
         true,           # bounds_print
@@ -127,6 +129,7 @@ function Optimizer()
         false,          # timer_outputs
         nothing,        # custom_variable_order
         10000,          # max_allowed_domain_size
+        1e-6,           # constraint_feasibility_tol
         nothing,        # time_limit
         false,          # silent
 
