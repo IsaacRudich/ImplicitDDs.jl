@@ -9,7 +9,7 @@ COMMENTS UP TO DATE
         buffer_offset::Int, int_var_to_pos_rows::Dict{Int, Vector{Int}},
         int_var_to_neg_rows::Dict{Int, Vector{Int}},
         lbs_int::Union{Vector{Z}, BitVector}, ubs_int::Union{Vector{Z}, BitVector},
-        inv_coeff::Matrix{T}, nodes::NodeLayer{Z}
+        inv_coeff::Matrix{T}, nodes::NodeLayer{Z}; integer_rounding_tol::T
     ) where {Z<:Integer, T<:Real}
 
 Computes implied variable domain bounds for each parent node using constraint propagation with optimized operations.
@@ -30,6 +30,7 @@ integer rounding to ensure feasibility.
 - `ubs_int::Union{Vector{Z}, BitVector}`: Global upper bounds for integer variables
 - `inv_coeff::Matrix{T}`: Precomputed inverse coefficients [num_constraints, num_int_vars] for division→multiplication optimization
 - `nodes::NodeLayer{Z}`: Previous layer nodes; inactive nodes get infeasible bounds
+- `integer_rounding_tol::T`: Slack allowed when rounding computed bounds on integer variables
 
 # Algorithm
 For positive coefficients: `new_ub = floor((gap * inv_coeff) + lb)` (multiplication instead of division)
@@ -49,7 +50,7 @@ Inactive nodes receive infeasible bounds (`lb > ub`).
     ubs_int                 ::Union{Vector{Z}, BitVector},
     inv_coeff               ::Matrix{T},
     nodes                   ::NodeLayer{Z};
-    rounding_tol            ::T = T(1e-6),
+    integer_rounding_tol    ::T
 ) where {Z<:Integer, T<:Real}
     # Determine the integer type for floor/ceil operations
     IntType = lbs_int isa BitVector ? Bool : Z
@@ -97,9 +98,9 @@ Inactive nodes receive infeasible bounds (`lb > ub`).
                 test_limit = (inf_col[row_index] * inv_col[row_index]) + ub
                 temp_lb = max(temp_lb, test_limit)
             end
-            # Store the results for this column (tolerance handles inv_coeff precision loss)
-            temp_ub = floor(IntType, temp_ub + rounding_tol)
-            temp_lb = ceil(IntType, temp_lb - rounding_tol)
+            # Store the results for this column
+            temp_ub = floor(IntType, temp_ub + integer_rounding_tol)
+            temp_lb = ceil(IntType, temp_lb - integer_rounding_tol)
 
 
             lb_col[i] = temp_lb

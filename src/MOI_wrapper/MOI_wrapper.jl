@@ -40,6 +40,7 @@ ImplicitDDs solver optimizer for MathOptInterface.
 | `custom_variable_order` | Vector{MOI.VariableIndex}/Nothing | nothing | Custom variable ordering |
 | `max_allowed_domain_size` | Int | 10000 | Largest integer variable domain (ub - lb + 1) accepted |
 | `constraint_feasibility_tol` | Float64 | 1e-6 | Amount by which a returned solution may violate each constraint |
+| `integer_rounding_tol` | Float64 | 1e-6 | Slack allowed when rounding computed bounds on integer variables |
 | `MOI.Silent()` | Bool | false | Suppress all output |
 | `MOI.TimeLimitSec()` | Float64/Nothing | nothing | Time limit in seconds |
 
@@ -80,6 +81,7 @@ mutable struct Optimizer <: MOI.AbstractOptimizer
     custom_variable_order::Union{Vector{MOI.VariableIndex}, Nothing}
     max_allowed_domain_size::Int
     constraint_feasibility_tol::Float64
+    integer_rounding_tol::Float64
 
     # Standard MOI attributes
     time_limit::Union{Float64, Nothing}  # seconds (converted to minutes for solve_mip)
@@ -130,6 +132,7 @@ function Optimizer()
         nothing,        # custom_variable_order
         10000,          # max_allowed_domain_size
         1e-6,           # constraint_feasibility_tol
+        1e-6,           # integer_rounding_tol
         nothing,        # time_limit
         false,          # silent
 

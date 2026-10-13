@@ -94,6 +94,9 @@ to prove optimality.
 - `constraint_feasibility_tol::Real = 1e-6`: Amount by which a returned solution may violate each constraint
   - **Behavior**: Candidate solutions are checked against the original constraints and rejected if any constraint is violated by more than this
 
+- `integer_rounding_tol::Real = 1e-6`: Slack allowed when rounding computed bounds on integer variables
+  - **How to choose**: Can be changed, but we don't recommend it
+
 # Returns
 
 Returns a tuple `(is_feasible, bks_int, bks_cont, bkv)`:
@@ -172,6 +175,7 @@ function solve_mip(
     custom_variable_order::Union{Vector{VariableRef}, Nothing} = nothing,
     max_allowed_domain_size::Int = 10000,
     constraint_feasibility_tol::Real = 1e-6,
+    integer_rounding_tol::Real = 1e-6,
     _force_parallel_precompile::Bool = false
 )
 
@@ -193,7 +197,7 @@ function solve_mip(
     end
 
 
-    model, lbs_int, ubs_int, lbs_cont, ubs_cont, num_int_vars, num_cont_vars, num_constraints, int_obj_coeffs, cont_obj_coeffs, obj_const, coefficient_matrix_int_cols, int_var_to_pos_rows, int_var_to_neg_rows, int_var_to_zero_rows, coefficient_matrix_cont_cols, cont_var_to_pos_rows, cont_var_to_neg_rows, cont_var_to_zero_rows, coefficient_matrix_rhs_vector, int_var_refs, cont_var_refs, sense_multiplier, inverse_order, conversion_time = setup_from_JuMP_model(model, numerical_precision, suppress_all_prints, debug_mode, custom_variable_order)
+    model, lbs_int, ubs_int, lbs_cont, ubs_cont, num_int_vars, num_cont_vars, num_constraints, int_obj_coeffs, cont_obj_coeffs, obj_const, coefficient_matrix_int_cols, int_var_to_pos_rows, int_var_to_neg_rows, int_var_to_zero_rows, coefficient_matrix_cont_cols, cont_var_to_pos_rows, cont_var_to_neg_rows, cont_var_to_zero_rows, coefficient_matrix_rhs_vector, first_paired_row, int_var_refs, cont_var_refs, sense_multiplier, inverse_order, conversion_time = setup_from_JuMP_model(model, numerical_precision, suppress_all_prints, debug_mode, custom_variable_order)
 
     time_limit_start = time()
     time_limit_seconds = isnothing(time_limit) ? nothing : Float64(time_limit * 60)
@@ -363,7 +367,9 @@ function solve_mip(
         coefficient_matrix_int_cols, coefficient_matrix_cont_cols,
         int_var_to_pos_rows, int_var_to_neg_rows, int_var_to_zero_rows, cont_var_to_pos_rows, cont_var_to_neg_rows,
         infimum_gaps, cont_inf_gap_ctrbtns, num_int_vars, num_cont_vars, dd_ws.gap_adjustments,
-        max_iterations = 100
+        max_iterations = 100,
+        integer_rounding_tol = numerical_precision(integer_rounding_tol),
+        constraint_feasibility_tol = numerical_precision(constraint_feasibility_tol)
     )
 
     if !fbbt_yields_feasible_bounds
@@ -394,6 +400,8 @@ function solve_mip(
     lp_sub_model, lp_vars, lp_constraint_refs = lp_params[1]
 
     if num_cont_vars > 0
+        dd_ws.lp_rhs .= infimum_gaps .- cont_inf_gap_ctrbtns
+        set_LP_rhs!(dd_ws.lp_rhs, first_paired_row, num_constraints, lp_constraint_refs)
         optimize!(lp_sub_model)
         # println("LP Status: ", termination_status(lp_sub_model))
         if termination_status(lp_sub_model) == MOI.OPTIMAL
@@ -447,16 +455,17 @@ function solve_mip(
             obj_const,
             int_var_to_pos_rows, int_var_to_neg_rows,
             ubs_int, lbs_int, dd_ws.original_lbs_int,
-            num_int_vars, num_cont_vars, num_constraints,
+            num_int_vars, num_cont_vars, num_constraints, first_paired_row,
             dd_ws.rough_bounds_int, rough_bounds_cont_val, infimum_gaps, cont_inf_gap_ctrbtns,
             dd_ws.coeff_times_val, dd_ws.gap_adjustments, dd_ws.inv_coeff, dd_ws.inv_obj_coeffs,
             lp_sub_model, lp_vars, lp_constraint_refs,
             dd_ws.bin_counts, dd_ws.restricted_bins_matrix, dd_ws.cumulative_bins,
-            coefficient_matrix_int_cols, coefficient_matrix_rhs_vector, dd_ws.rel_path, dd_ws.wrk_vec,
+            coefficient_matrix_int_cols, coefficient_matrix_rhs_vector, dd_ws.rel_path, dd_ws.wrk_vec, dd_ws.lp_rhs,
             10000, num_LPs_to_run,
             dd_ws.timing_stats,
             calculate_child_time_budget(time_limit_seconds, time_limit_start);
-            constraint_feasibility_tol = numerical_precision(constraint_feasibility_tol)
+            constraint_feasibility_tol = numerical_precision(constraint_feasibility_tol),
+            integer_rounding_tol = numerical_precision(integer_rounding_tol)
         )
 
         if is_feasible_restricted
@@ -529,16 +538,17 @@ function solve_mip(
         obj_const,
         int_var_to_pos_rows, int_var_to_neg_rows,
         ubs_int, lbs_int, dd_ws.original_lbs_int,
-        num_int_vars, num_cont_vars, num_constraints,
+        num_int_vars, num_cont_vars, num_constraints, first_paired_row,
         dd_ws.rough_bounds_int, rough_bounds_cont_val, infimum_gaps, cont_inf_gap_ctrbtns,
         dd_ws.coeff_times_val, dd_ws.gap_adjustments, dd_ws.inv_coeff, dd_ws.inv_obj_coeffs,
         lp_sub_model, lp_vars, lp_constraint_refs,
         dd_ws.bin_counts, dd_ws.restricted_bins_matrix, dd_ws.cumulative_bins,
-        coefficient_matrix_int_cols, coefficient_matrix_rhs_vector, dd_ws.rel_path, dd_ws.wrk_vec,
+        coefficient_matrix_int_cols, coefficient_matrix_rhs_vector, dd_ws.rel_path, dd_ws.wrk_vec, dd_ws.lp_rhs,
         initial_dd_width, num_LPs_to_run,
         dd_ws.timing_stats,
         calculate_child_time_budget(time_limit_seconds, time_limit_start);
-        constraint_feasibility_tol = numerical_precision(constraint_feasibility_tol)
+        constraint_feasibility_tol = numerical_precision(constraint_feasibility_tol),
+        integer_rounding_tol = numerical_precision(integer_rounding_tol)
     )
 
     if !suppress_all_prints
@@ -643,7 +653,7 @@ function solve_mip(
         int_obj_coeffs, obj_const, coefficient_matrix_int_cols, coefficient_matrix_rhs_vector, dd_ws.inv_coeff, dd_ws.coeff_times_val,
         int_var_to_pos_rows, int_var_to_neg_rows,
         ubs_int, lbs_int, dd_ws.original_lbs_int, bkv, dd_ws.bks_int, dd_ws.bks_cont,
-        num_int_vars, num_cont_vars, num_constraints,
+        num_int_vars, num_cont_vars, num_constraints, first_paired_row,
         dd_ws.rough_bounds_int, rough_bounds_cont_val,
         infimum_gaps, dd_ws.infimum_gap_matrices, dd_ws.node_matrix, dd_ws.extra_layer,
         dd_ws.ltr_matrix, dd_ws.ltt_matrix,
@@ -651,11 +661,12 @@ function solve_mip(
         dd_ws.wrk_vec, cont_inf_gap_ctrbtns,
         dd_ws.arc_count_per_node, dd_ws.node_bin_counts, dd_ws.node_cumulative, dd_ws.global_lower, dd_ws.global_upper, dd_ws.bins_matrix,
         dd_ws.bnb_queue,  dd_ws.added_queue_nodes,
-        lp_sub_model, lp_vars, lp_constraint_refs,
+        lp_sub_model, lp_vars, lp_constraint_refs, dd_ws.lp_rhs,
         initial_dd_width, dd_ws.timing_stats;
         debug_mode = debug_mode,
         time_remaining = calculate_child_time_budget(time_limit_seconds, time_limit_start),
-        constraint_feasibility_tol = numerical_precision(constraint_feasibility_tol)
+        constraint_feasibility_tol = numerical_precision(constraint_feasibility_tol),
+        integer_rounding_tol = numerical_precision(integer_rounding_tol)
     )
 
     if !suppress_all_prints
@@ -771,7 +782,7 @@ function solve_mip(
                 log_bounds(best_bound, bkv, sense_multiplier, length(dd_ws.bnb_queue), bounds_print, suppress_all_prints, runtime_log_file_path,  solve_start, true_start,  logs, wait_to_write_solutions)
             end
 
-            temp_bkv, overhead_time, dd_time_during = process_queue_node!(next_node, dd_ws, int_obj_coeffs, coefficient_matrix_int_cols, coefficient_matrix_cont_cols, coefficient_matrix_rhs_vector, int_var_to_pos_rows, int_var_to_neg_rows, int_var_to_zero_rows, cont_var_to_pos_rows, cont_var_to_neg_rows, lbs_int, ubs_int, lbs_cont, ubs_cont, cont_obj_coeffs, num_int_vars, num_cont_vars, num_constraints, infimum_gaps, cont_inf_gap_ctrbtns, bkv, lp_sub_model, lp_vars, lp_constraint_refs, restricted_w, relaxed_w, num_LPs_to_run, debug_mode, inverse_order, sense_multiplier, solve_start, true_start, calculate_child_time_budget(time_limit_seconds, time_limit_start); constraint_feasibility_tol = numerical_precision(constraint_feasibility_tol))
+            temp_bkv, overhead_time, dd_time_during = process_queue_node!(next_node, dd_ws, int_obj_coeffs, coefficient_matrix_int_cols, coefficient_matrix_cont_cols, coefficient_matrix_rhs_vector, int_var_to_pos_rows, int_var_to_neg_rows, int_var_to_zero_rows, cont_var_to_pos_rows, cont_var_to_neg_rows, lbs_int, ubs_int, lbs_cont, ubs_cont, cont_obj_coeffs, num_int_vars, num_cont_vars, num_constraints, first_paired_row, infimum_gaps, cont_inf_gap_ctrbtns, bkv, lp_sub_model, lp_vars, lp_constraint_refs, restricted_w, relaxed_w, num_LPs_to_run, debug_mode, inverse_order, sense_multiplier, solve_start, true_start, calculate_child_time_budget(time_limit_seconds, time_limit_start); constraint_feasibility_tol = numerical_precision(constraint_feasibility_tol), integer_rounding_tol = numerical_precision(integer_rounding_tol))
             node_count += 1
             double_counted_time += dd_time_during
 
@@ -812,12 +823,13 @@ function solve_mip(
                         int_var_to_pos_rows, int_var_to_neg_rows, int_var_to_zero_rows,
                         cont_var_to_pos_rows, cont_var_to_neg_rows,
                         lbs_int, ubs_int, lbs_cont, ubs_cont, cont_obj_coeffs,
-                        num_int_vars, num_cont_vars, num_constraints,
+                        num_int_vars, num_cont_vars, num_constraints, first_paired_row,
                         infimum_gaps, cont_inf_gap_ctrbtns,
                         local_lp_model, local_lp_vars, local_lp_constraints,
                         restricted_w, relaxed_w, num_LPs_to_run, debug_mode,
                         inverse_order, sense_multiplier, solve_start, true_start;
-                        constraint_feasibility_tol = numerical_precision(constraint_feasibility_tol)
+                        constraint_feasibility_tol = numerical_precision(constraint_feasibility_tol),
+                        integer_rounding_tol = numerical_precision(integer_rounding_tol)
                     )
                 catch e
                     println("╔═══════════════════════════════════════════════════════════")
@@ -1058,7 +1070,7 @@ function worker_loop(
     int_var_to_pos_rows::Dict{Int, Vector{Int}}, int_var_to_neg_rows::Dict{Int, Vector{Int}}, int_var_to_zero_rows::Dict{Int, Vector{Int}},
     cont_var_to_pos_rows::Dict{Int, Vector{Int}}, cont_var_to_neg_rows::Dict{Int, Vector{Int}},
     lbs_int::Union{Vector{Z}, BitVector}, ubs_int::Union{Vector{Z}, BitVector}, lbs_cont::Vector{T}, ubs_cont::Vector{T}, cont_obj_coeffs::Vector{T},
-    num_int_vars::Int, num_cont_vars::Int, num_constraints::Int,
+    num_int_vars::Int, num_cont_vars::Int, num_constraints::Int, first_paired_row::Int,
     #global infimum gaps
     infimum_gaps::Vector{T}, cont_inf_gap_ctrbtns::Vector{T},
     #LP model
@@ -1068,7 +1080,8 @@ function worker_loop(
     #logging
     inverse_order::Vector{Int}, sense_multiplier::Int, solve_start::Float64, true_start::Float64;
     #settings
-    constraint_feasibility_tol::T
+    constraint_feasibility_tol::T,
+    integer_rounding_tol::T
 ) where {Z<:Integer, T<:Real}
 
     while true
@@ -1100,14 +1113,15 @@ function worker_loop(
             int_var_to_pos_rows, int_var_to_neg_rows, int_var_to_zero_rows,
             cont_var_to_pos_rows, cont_var_to_neg_rows,
             lbs_int, ubs_int, lbs_cont, ubs_cont, cont_obj_coeffs,
-            num_int_vars, num_cont_vars, num_constraints,
+            num_int_vars, num_cont_vars, num_constraints, first_paired_row,
             infimum_gaps, cont_inf_gap_ctrbtns,
             current_bkv,
             lp_sub_model, lp_vars, lp_constraint_refs,
             restricted_w, relaxed_w, num_LPs_to_run, debug_mode,
             inverse_order, sense_multiplier, solve_start, true_start,
             time_remaining;
-            constraint_feasibility_tol = constraint_feasibility_tol
+            constraint_feasibility_tol = constraint_feasibility_tol,
+            integer_rounding_tol = integer_rounding_tol
         )
 
         # Extract newly added nodes from worker's queue
@@ -1151,6 +1165,7 @@ Process a single queue node in the branch-and-bound loop by running restricted a
 - `num_int_vars::Int`: Number of integer variables
 - `num_cont_vars::Int`: Number of continuous variables
 - `num_constraints::Int`: Number of constraints
+- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
 - `infimum_gaps::Vector{T}`: Global infimum gaps for each constraint
 - `cont_inf_gap_ctrbtns::Vector{T}`: Continuous variable contributions to infimum gaps
 - `bkv::T`: Current best known objective value
@@ -1167,6 +1182,7 @@ Process a single queue node in the branch-and-bound loop by running restricted a
 - `true_start::Float64`: Timestamp when overall execution started
 - `time_remaining::Union{Float64, Nothing}`: Time budget in seconds (nothing if no time limit)
 - `constraint_feasibility_tol::T`: Amount by which an accepted solution may violate each constraint
+- `integer_rounding_tol::T`: Slack allowed when rounding computed bounds on integer variables
 
 # Returns
 - `Tuple{T, Float64, Float64}`: A tuple containing:
@@ -1193,7 +1209,7 @@ function process_queue_node!(
     int_var_to_pos_rows::Dict{Int, Vector{Int}}, int_var_to_neg_rows::Dict{Int, Vector{Int}}, int_var_to_zero_rows::Dict{Int, Vector{Int}},
     cont_var_to_pos_rows::Dict{Int, Vector{Int}}, cont_var_to_neg_rows::Dict{Int, Vector{Int}},
     lbs_int::Union{Vector{Z}, BitVector}, ubs_int::Union{Vector{Z}, BitVector}, lbs_cont::Vector{T}, ubs_cont::Vector{T}, cont_obj_coeffs::Vector{T},
-    num_int_vars::Int, num_cont_vars::Int, num_constraints::Int,
+    num_int_vars::Int, num_cont_vars::Int, num_constraints::Int, first_paired_row::Int,
     #global infimum gaps
     infimum_gaps::Vector{T}, cont_inf_gap_ctrbtns::Vector{T},
     #best stuff
@@ -1205,7 +1221,8 @@ function process_queue_node!(
     #logging
     inverse_order::Vector{Int}, sense_multiplier::Int, solve_start::Float64, true_start::Float64,
     time_remaining::Union{Float64, Nothing} = nothing;
-    constraint_feasibility_tol::T
+    constraint_feasibility_tol::T,
+    integer_rounding_tol::T
 ) where {Z<:Integer, T<:Real}
     function_start_time = time()
     dd_time_before = dd_ws.timing_stats.restricted_dd_total + dd_ws.timing_stats.relaxed_dd_total
@@ -1243,7 +1260,9 @@ function process_queue_node!(
         int_var_to_pos_rows, int_var_to_neg_rows, int_var_to_zero_rows,
         cont_var_to_pos_rows, cont_var_to_neg_rows,
         dd_ws.local_infimum_gaps, dd_ws.local_cont_inf_contr, num_int_vars, num_cont_vars, dd_ws.gap_adjustments,
-        max_iterations = 100
+        max_iterations = 100,
+        integer_rounding_tol = integer_rounding_tol,
+        constraint_feasibility_tol = constraint_feasibility_tol
     )
 
     # 4. Skip node if FBBT detected infeasibility
@@ -1265,16 +1284,17 @@ function process_queue_node!(
     temp_bkv, is_exact = setup_and_run_restricted_dd!(
         dd_ws.rdd, next_node, bkv, dd_ws.bks_int, dd_ws.bks_cont,
         int_var_to_pos_rows, int_var_to_neg_rows, dd_ws.local_ubs_int, dd_ws.local_lbs_int, dd_ws.original_lbs_int,
-        num_int_vars, num_cont_vars, num_constraints,
+        num_int_vars, num_cont_vars, num_constraints, first_paired_row,
         dd_ws.rough_bounds_int, local_cont_bound, dd_ws.local_infimum_gaps, dd_ws.local_cont_inf_contr,
         dd_ws.coeff_times_val, dd_ws.gap_adjustments, dd_ws.inv_coeff, dd_ws.inv_obj_coeffs,
         lp_sub_model, lp_vars, lp_constraint_refs,
         dd_ws.bin_counts, dd_ws.restricted_bins_matrix, dd_ws.cumulative_bins,
-        coefficient_matrix_int_cols, coefficient_matrix_rhs_vector, dd_ws.rel_path, dd_ws.wrk_vec,
+        coefficient_matrix_int_cols, coefficient_matrix_rhs_vector, dd_ws.rel_path, dd_ws.wrk_vec, dd_ws.lp_rhs,
         restricted_w, num_LPs_to_run,
         dd_ws.timing_stats,
         calculate_child_time_budget(time_remaining, function_start_time);
-        constraint_feasibility_tol = constraint_feasibility_tol
+        constraint_feasibility_tol = constraint_feasibility_tol,
+        integer_rounding_tol = integer_rounding_tol
     )
 
     if debug_mode
@@ -1302,7 +1322,7 @@ function process_queue_node!(
         int_obj_coeffs, coefficient_matrix_int_cols, coefficient_matrix_rhs_vector, dd_ws.inv_coeff, dd_ws.coeff_times_val,
         int_var_to_pos_rows, int_var_to_neg_rows,
         dd_ws.local_ubs_int, dd_ws.local_lbs_int, dd_ws.original_lbs_int, bkv,  dd_ws.bks_int, dd_ws.bks_cont, next_node,
-        num_int_vars, num_cont_vars, num_constraints,
+        num_int_vars, num_cont_vars, num_constraints, first_paired_row,
         dd_ws.rough_bounds_int, local_cont_bound,
         dd_ws.local_infimum_gaps, dd_ws.infimum_gap_matrices, dd_ws.node_matrix, dd_ws.extra_layer,
         dd_ws.ltr_matrix, dd_ws.ltt_matrix,
@@ -1310,11 +1330,12 @@ function process_queue_node!(
         dd_ws.wrk_vec, dd_ws.local_cont_inf_contr,
         dd_ws.arc_count_per_node, dd_ws.node_bin_counts, dd_ws.node_cumulative, dd_ws.global_lower, dd_ws.global_upper, dd_ws.bins_matrix,
         dd_ws.bnb_queue, dd_ws.added_queue_nodes,
-        lp_sub_model, lp_vars, lp_constraint_refs,
+        lp_sub_model, lp_vars, lp_constraint_refs, dd_ws.lp_rhs,
         relaxed_w, dd_ws.timing_stats;
         debug_mode = debug_mode,
         time_remaining = calculate_child_time_budget(time_remaining, function_start_time),
-        constraint_feasibility_tol = constraint_feasibility_tol
+        constraint_feasibility_tol = constraint_feasibility_tol,
+        integer_rounding_tol = integer_rounding_tol
     )
 
     if temp_bkv < bkv
@@ -1364,10 +1385,12 @@ Converts a JuMP model into ImplicitDDs solver data structures with adaptive vari
   18. `Dict{Int, Vector{Int}}`: Continuous variable to negative coefficient rows mapping
   19. `Dict{Int, Vector{Int}}`: Continuous variable to zero coefficient rows mapping
   20. `Vector{T}`: Constraint RHS vector
-  21. `Vector{JuMP.VariableRef}`: Ordered integer variable references
-  22. `Vector{JuMP.VariableRef}`: Continuous variable references
-  23. `Int`: Objective sense multiplier (+1 for Min, -1 for Max)
-  24. `Vector{Int}`: Inverse permutation mapping ordered variables back to original order
+  21. `Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
+  22. `Vector{JuMP.VariableRef}`: Ordered integer variable references
+  23. `Vector{JuMP.VariableRef}`: Continuous variable references
+  24. `Int`: Objective sense multiplier (+1 for Min, -1 for Max)
+  25. `Vector{Int}`: Inverse permutation mapping ordered variables back to original order
+  26. `Float64`: Conversion time in seconds
 
 # Algorithm
 1. Extract integer and continuous variable references from model
@@ -1461,7 +1484,7 @@ function setup_from_JuMP_model(model::JuMP.Model, precision::DataType, suppress_
     MOI.copy_to(gm, moi_model)
     int_obj_coeffs, cont_obj_coeffs, obj_const, sense_multiplier = get_objective_vector(gm, moi_int_vars_ordered, moi_cont_vars_ordered, coefficient_type, precision)
 
-    coefficient_matrix_int_cols, int_var_to_pos_rows, int_var_to_neg_rows, int_var_to_zero_rows, coefficient_matrix_cont_cols, cont_var_to_pos_rows, cont_var_to_neg_rows, cont_var_to_zero_rows, coefficient_matrix_rhs_vector = get_coefficient_matrix(gm, moi_int_vars_ordered, moi_cont_vars_ordered, coefficient_type, precision)
+    coefficient_matrix_int_cols, int_var_to_pos_rows, int_var_to_neg_rows, int_var_to_zero_rows, coefficient_matrix_cont_cols, cont_var_to_pos_rows, cont_var_to_neg_rows, cont_var_to_zero_rows, coefficient_matrix_rhs_vector, first_paired_row = get_coefficient_matrix(gm, moi_int_vars_ordered, moi_cont_vars_ordered, coefficient_type, precision)
     num_constraints = size(coefficient_matrix_int_cols, 1)
 
     # This maps from METIS position back to original position
@@ -1504,5 +1527,5 @@ function setup_from_JuMP_model(model::JuMP.Model, precision::DataType, suppress_
         println("Constraints: ", num_constraints, "\n")
     end
 
-    return model, lbs_int, ubs_int, lbs_cont, ubs_cont, num_int_vars, num_cont_vars, num_constraints, int_obj_coeffs, cont_obj_coeffs, obj_const, coefficient_matrix_int_cols, int_var_to_pos_rows, int_var_to_neg_rows, int_var_to_zero_rows, coefficient_matrix_cont_cols, cont_var_to_pos_rows, cont_var_to_neg_rows, cont_var_to_zero_rows, coefficient_matrix_rhs_vector, int_vars, cont_vars, sense_multiplier, inverse_order, conversion_time
+    return model, lbs_int, ubs_int, lbs_cont, ubs_cont, num_int_vars, num_cont_vars, num_constraints, int_obj_coeffs, cont_obj_coeffs, obj_const, coefficient_matrix_int_cols, int_var_to_pos_rows, int_var_to_neg_rows, int_var_to_zero_rows, coefficient_matrix_cont_cols, cont_var_to_pos_rows, cont_var_to_neg_rows, cont_var_to_zero_rows, coefficient_matrix_rhs_vector, first_paired_row, int_vars, cont_vars, sense_multiplier, inverse_order, conversion_time
 end

@@ -25,6 +25,7 @@ Type parameters match the problem's integer type (Z) and numerical precision (T)
 - `high_indexes::Vector{<:Integer}`: Working vector for high indexes (relaxed DD only, width: relaxed_w, type: Int8/16/32/64 based on w)
 - `bin_counts::Vector{Int}`: Working vector for bin counts (both DDs, width: w)
 - `wrk_vec::Vector{T}`: Working vector for computations (both DDs)
+- `lp_rhs::Vector{T}`: Right-hand sides for the LP subproblem (both DDs)
 - `rel_path::Union{Vector{Z}, BitVector}`: Relaxed path vector (relaxed DD only)
 - `feasibility_accumulator::Vector{T}`: Feasibility accumulator vector (relaxed DD only)
 - `arc_count_per_node::Vector{<:Integer}`: Workspace for feasible arc counts per node, size: [max_domain_size] (max value: w, type: Int8/16/32/64 based on w)
@@ -75,6 +76,7 @@ mutable struct DDWorkspace{Z<:Integer, T<:Real}
     low_indexes::Vector{<:Integer}
     high_indexes::Vector{<:Integer}
     wrk_vec::Vector{T}
+    lp_rhs::Vector{T}
     rel_path::Union{Vector{Z}, BitVector}
     feasibility_accumulator::Vector{T}
     arc_count_per_node::Vector{<:Integer}
@@ -195,6 +197,7 @@ function preallocate_dd_memory(
     low_indexes = Vector{type_w}(undef, relaxed_w)
     high_indexes = Vector{type_w}(undef, relaxed_w)
     wrk_vec = preallocate_vector(num_constraints, numerical_precision)
+    lp_rhs = preallocate_vector(num_constraints, numerical_precision)
 
 
     # TYPE VARIES BASED ON all_vars_binary
@@ -292,7 +295,7 @@ function preallocate_dd_memory(
     container = DDWorkspace(
         lb_matrix, ub_matrix, infimum_gap_matrices, ltr_matrix, ltt_matrix,
         node_matrix, extra_layer, rdd,
-        low_indexes, high_indexes, wrk_vec, rel_path, feasibility_accumulator,
+        low_indexes, high_indexes, wrk_vec, lp_rhs, rel_path, feasibility_accumulator,
         arc_count_per_node, node_bin_counts, node_cumulative, global_lower, global_upper, bins_matrix,
         bin_counts, cumulative_bins, restricted_bins_matrix,
         coeff_times_val, gap_adjustments, inv_coeff, inv_obj_coeffs,

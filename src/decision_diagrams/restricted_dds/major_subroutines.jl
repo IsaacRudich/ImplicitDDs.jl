@@ -3,7 +3,7 @@ COMMENTS UP TO DATE
 """
 
 """
-    compute_implied_column_bounds!(lb_col::Union{Vector{Z}, BitVector}, ub_col::Union{Vector{Z}, BitVector}, var_index::Int, infimum_gap_matrix::Matrix{T}, int_var_to_pos_rows::Dict{Int, Vector{Int}}, int_var_to_neg_rows::Dict{Int, Vector{Int}}, lbs_int::Union{Vector{Z}, BitVector}, ubs_int::Union{Vector{Z}, BitVector}, inv_coeff::Matrix{T}, size::Integer) where {Z<:Integer, T<:Real}
+    compute_implied_column_bounds!(lb_col::Union{Vector{Z}, BitVector}, ub_col::Union{Vector{Z}, BitVector}, var_index::Int, infimum_gap_matrix::Matrix{T}, int_var_to_pos_rows::Dict{Int, Vector{Int}}, int_var_to_neg_rows::Dict{Int, Vector{Int}}, lbs_int::Union{Vector{Z}, BitVector}, ubs_int::Union{Vector{Z}, BitVector}, inv_coeff::Matrix{T}, size::Integer; integer_rounding_tol::T) where {Z<:Integer, T<:Real}
 
 Computes the variable bounds for each node implied by their infimum gaps (slack in the constraints).
 
@@ -18,6 +18,7 @@ Computes the variable bounds for each node implied by their infimum gaps (slack 
 - `ubs_int::Union{Vector{Z}, BitVector}`: Upper bounds for integer variables
 - `inv_coeff::Matrix{T}`: Precomputed inverse coefficients [num_constraints, num_int_vars] for division→multiplication optimization
 - `size::Integer`: Number of nodes in the current layer
+- `integer_rounding_tol::T`: Slack allowed when rounding computed bounds on integer variables
 
 # Algorithm
 1. For each node, starts with global variable bounds [lb, ub]
@@ -40,7 +41,7 @@ Computes the variable bounds for each node implied by their infimum gaps (slack 
     ubs_int                 ::Union{Vector{Z}, BitVector},
     inv_coeff               ::Matrix{T},
     size                    ::Integer;
-    rounding_tol            ::T = T(1e-6),
+    integer_rounding_tol    ::T
 ) where {Z<:Integer, T<:Real}
     # Determine the integer type for floor/ceil operations
     IntType = lbs_int isa BitVector ? Bool : Z
@@ -81,9 +82,9 @@ Computes the variable bounds for each node implied by their infimum gaps (slack 
             test_limit = (infimum_col[row_index] * inv_col[row_index]) + ub
             temp_lb = max(temp_lb, test_limit)
         end
-        # Store the results for this column (tolerance handles inv_coeff precision loss)
-        temp_ub = floor(IntType, temp_ub + rounding_tol)
-        temp_lb = ceil(IntType, temp_lb - rounding_tol)
+        # Store the results for this column
+        temp_ub = floor(IntType, temp_ub + integer_rounding_tol)
+        temp_lb = ceil(IntType, temp_lb - integer_rounding_tol)
 
         lb_col[i] = temp_lb
         ub_col[i] = temp_ub

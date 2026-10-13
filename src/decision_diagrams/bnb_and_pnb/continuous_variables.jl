@@ -83,7 +83,7 @@ end
         coefficient_matrix_rhs_vector::Vector{T}, int_var_to_pos_rows::Dict{Int, Vector{Int}},
         int_var_to_neg_rows::Dict{Int, Vector{Int}}, lbs_int::Union{Vector{Z}, BitVector},
         ubs_int::Union{Vector{Z}, BitVector}, num_int_vars::Int, num_cont_vars::Int,
-        num_constraints::Int, lp_sub_model::JuMP.Model,
+        num_constraints::Int, first_paired_row::Int, lp_sub_model::JuMP.Model,
         lp_constraint_refs::Vector{JuMP.ConstraintRef}, rough_bounds_cont_val::T,
         adjusted_gaps::Vector{T}, timing_stats::TimingStats
     ) where {Z<:Integer, T<:Real}
@@ -100,6 +100,7 @@ Computes a tighter bound on the contribution of the continuous variables given a
 - `ubs_int::Union{Vector{Z}, BitVector}`: Upper bounds for integer variables
 - `num_int_vars::Int`: Total number of integer variables
 - `num_constraints::Int`: Number of constraints
+- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
 - `lp_sub_model::JuMP.Model`: Existing LP model for continuous variable optimization
 - `lp_constraint_refs::Vector{JuMP.ConstraintRef}`: References to LP constraint objects for RHS updates
 - `rough_bounds_cont_val::T`: Fallback bound value if LP is infeasible
@@ -120,6 +121,7 @@ function compute_tighter_continuous_bound!(
     num_int_vars                 ::Int,
     num_cont_vars                ::Int,
     num_constraints              ::Int,
+    first_paired_row             ::Int,
     lp_sub_model                 ::JuMP.Model,
     lp_constraint_refs           ::Vector{JuMP.ConstraintRef},
     rough_bounds_cont_val        ::T,
@@ -175,11 +177,8 @@ function compute_tighter_continuous_bound!(
     end
     
     #update constraint RHS values in the existing LP model
-    @inbounds for row_idx in 1:num_constraints
-        new_rhs = adjusted_gaps[row_idx]
-        set_normalized_rhs(lp_constraint_refs[row_idx], new_rhs)
-    end
-    
+    set_LP_rhs!(adjusted_gaps, first_paired_row, num_constraints, lp_constraint_refs)
+
     #solve the LP
     @time_operation timing_stats post_relaxed_dd_true_LP begin
         optimize!(lp_sub_model)
@@ -314,6 +313,37 @@ function compute_path_rhs!(
         @simd for i in 1:num_constraints
             rhs_buffer[i] -= col[i] * val
         end
+    end
+end
+
+
+"""
+    set_LP_rhs!(lp_rhs::Vector{U}, first_paired_row::Int, num_constraints::Int, lp_constraint_refs::Vector{JuMP.ConstraintRef}) where {U<:Real}
+
+Sets the right-hand sides of the LP subproblem, first moving the two rows of any crossed == constraint to their midpoint.
+
+# Arguments
+- `lp_rhs::Vector{U}`: Right-hand side for each constraint (crossed pairs are overwritten)
+- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
+- `num_constraints::Int`: Number of constraints
+- `lp_constraint_refs::Vector{JuMP.ConstraintRef}`: References to LP constraint objects
+"""
+function set_LP_rhs!(
+    lp_rhs              ::Vector{U},
+    first_paired_row    ::Int,
+    num_constraints     ::Int,
+    lp_constraint_refs  ::Vector{JuMP.ConstraintRef}
+) where {U<:Real}
+    # The right-hand sides of an == pair can only sum below zero through rounding error
+    @inbounds for row_idx in first_paired_row:2:num_constraints
+        if lp_rhs[row_idx] + lp_rhs[row_idx + 1] < 0
+            lp_rhs[row_idx] = (lp_rhs[row_idx] - lp_rhs[row_idx + 1]) / 2
+            lp_rhs[row_idx + 1] = -lp_rhs[row_idx]
+        end
+    end
+
+    @inbounds for row_idx in 1:num_constraints
+        set_normalized_rhs(lp_constraint_refs[row_idx], lp_rhs[row_idx])
     end
 end
 

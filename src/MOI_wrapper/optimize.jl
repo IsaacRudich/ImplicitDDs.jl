@@ -74,6 +74,7 @@ function MOI.optimize!(optimizer::Optimizer)
             custom_variable_order = custom_order,
             max_allowed_domain_size = optimizer.max_allowed_domain_size,
             constraint_feasibility_tol = optimizer.constraint_feasibility_tol,
+            integer_rounding_tol = optimizer.integer_rounding_tol,
         )
     catch e
         optimizer.termination_status = MOI.OTHER_ERROR

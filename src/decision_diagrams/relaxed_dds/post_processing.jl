@@ -8,7 +8,7 @@ COMMENTS UP TO DATE
         bks_cont::Vector{V}, fc_new_nodes::Vector{QueueNode{Z,V}},
         rel_path::Union{Vector{Z}, BitVector},
         feasibility_accumulator::Vector{V}, node_matrix::Vector{NodeLayer{Z}},
-        num_int_vars::Int, num_cont_vars::Int, num_constraints::Int,
+        num_int_vars::Int, num_cont_vars::Int, num_constraints::Int, first_paired_row::Int,
         ltr_matrix::Matrix{V}, ltt_matrix::Matrix{V},
         lb_matrix::Union{Matrix{Z}, BitMatrix}, ub_matrix::Union{Matrix{Z}, BitMatrix},
         int_obj_coeffs::Vector{V}, first_layer::Int,
@@ -19,7 +19,7 @@ COMMENTS UP TO DATE
         int_var_to_pos_rows::Dict{Int, Vector{Int}}, int_var_to_neg_rows::Dict{Int, Vector{Int}},
         lbs_int::Union{Vector{Z}, BitVector}, ubs_int::Union{Vector{Z}, BitVector},
         lp_sub_model::JuMP.Model, lp_vars::Vector{JuMP.VariableRef},
-        lp_constraint_refs::Vector{JuMP.ConstraintRef},
+        lp_constraint_refs::Vector{JuMP.ConstraintRef}, lp_rhs::Vector{V},
         timing_stats::TimingStats; debug_mode::Bool = false, time_remaining::Union{Float64, Nothing} = nothing, constraint_feasibility_tol::V
     ) where {Z<:Integer, V<:Real}
 
@@ -37,6 +37,7 @@ Processes a relaxed decision diagram to extract bounds, find optimal solutions, 
 - `num_int_vars::Int`: Number of integer variables
 - `num_cont_vars::Int`: Number of continuous variables
 - `num_constraints::Int`: Number of constraints
+- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
 - `ltr_matrix::Matrix{V}`: Length-to-root matrix with costs from root
 - `ltt_matrix::Matrix{V}`: Length-to-terminal matrix with cost-to-go estimates
 - `lb_matrix::Union{Matrix{Z}, BitMatrix}`: Lower bound matrix for feasible transitions
@@ -59,6 +60,7 @@ Processes a relaxed decision diagram to extract bounds, find optimal solutions, 
 - `lp_sub_model::JuMP.Model`: LP model for continuous variable optimization
 - `lp_vars::Vector{JuMP.VariableRef}`: LP variable references
 - `lp_constraint_refs::Vector{JuMP.ConstraintRef}`: LP constraint references
+- `lp_rhs::Vector{V}`: Working vector for the LP right-hand sides
 - `timing_stats::TimingStats`: Timing statistics tracker for relaxed DD operations
 - `debug_mode::Bool`: Enable debug output (default: false)
 - `time_remaining::Union{Float64, Nothing}`: Time budget in seconds for this function (nothing if no time limit)
@@ -88,6 +90,7 @@ Processes a relaxed decision diagram to extract bounds, find optimal solutions, 
     num_int_vars                    ::Int,
     num_cont_vars                   ::Int,
     num_constraints                 ::Int,
+    first_paired_row                ::Int,
 
     #state information for integer variables
     ltr_matrix                      ::Matrix{V},
@@ -114,6 +117,7 @@ Processes a relaxed decision diagram to extract bounds, find optimal solutions, 
     lp_sub_model                    ::JuMP.Model,
     lp_vars                         ::Vector{JuMP.VariableRef},
     lp_constraint_refs              ::Vector{JuMP.ConstraintRef},
+    lp_rhs                          ::Vector{V},
     timing_stats::TimingStats;
     debug_mode                      ::Bool = false,
     time_remaining                  ::Union{Float64, Nothing} = nothing,
@@ -141,10 +145,12 @@ Processes a relaxed decision diagram to extract bounds, find optimal solutions, 
                 wrk_vec,
                 lowest_ltr,
                 num_constraints,
+                first_paired_row,
                 cont_inf_gap_ctrbtns,
                 rough_bounds_cont_val,
                 lp_sub_model,
                 lp_constraint_refs,
+                lp_rhs,
                 timing_stats
             )
         end
@@ -205,10 +211,10 @@ Processes a relaxed decision diagram to extract bounds, find optimal solutions, 
     @time_operation timing_stats post_relaxed_dd_exact_cutset begin
         bkv, bks_was_updated, timed_out = process_last_exact_layer!(
             node_matrix, last_exact_layer_idx, bkv, bks_int, bks_cont, lb_matrix, ub_matrix, ltr_matrix, ltt_matrix,
-            num_int_vars, num_cont_vars, num_constraints,
+            num_int_vars, num_cont_vars, num_constraints, first_paired_row,
             fc_new_nodes, first_layer, preceeding_path,
             cont_contribution, infimum_gap_matrices, buffer_offset, cont_inf_gap_ctrbtns,
-            lp_sub_model, lp_vars, lp_constraint_refs,
+            lp_sub_model, lp_vars, lp_constraint_refs, lp_rhs,
             coefficient_matrix_int_cols, coefficient_matrix_rhs_vector,
             int_var_to_pos_rows, int_var_to_neg_rows,
             lbs_int, ubs_int, wrk_vec, rel_path, timing_stats;
@@ -523,7 +529,7 @@ end
 
 
 """
-    run_relaxed_LP!(bkv::U, gap_vector::AbstractVector{U}, ltr::U, num_constraints::Int, cont_inf_gap_ctrbtns::Vector{U}, rough_bounds_cont_val::U, lp_sub_model::JuMP.Model, lp_constraint_refs::Vector{JuMP.ConstraintRef}, timing_stats::TimingStats) where {U<:Real}
+    run_relaxed_LP!(bkv::U, gap_vector::AbstractVector{U}, ltr::U, num_constraints::Int, first_paired_row::Int, cont_inf_gap_ctrbtns::Vector{U}, rough_bounds_cont_val::U, lp_sub_model::JuMP.Model, lp_constraint_refs::Vector{JuMP.ConstraintRef}, lp_rhs::Vector{U}, timing_stats::TimingStats) where {U<:Real}
 
 Computes the continuous variable contribution to the relaxed bound by solving an LP subproblem.
 
@@ -532,10 +538,12 @@ Computes the continuous variable contribution to the relaxed bound by solving an
 - `gap_vector::AbstractVector{U}`: Infimum gaps representing relaxed constraint states
 - `ltr::U`: shortest length-to-root value from terminal nodes
 - `num_constraints::Int`: Number of constraints in the problem
+- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
 - `cont_inf_gap_ctrbtns::Vector{U}`: Continuous variable contributions to infimum gaps
 - `rough_bounds_cont_val::U`: Rough bound estimate for continuous variables
 - `lp_sub_model::JuMP.Model`: LP model for continuous variables
 - `lp_constraint_refs::Vector{JuMP.ConstraintRef}`: References to LP constraint objects
+- `lp_rhs::Vector{U}`: Working vector, holds the right-hand sides the LP was solved with
 - `timing_stats::TimingStats`: Timing statistics tracker for relaxed DD operations
 
 # Returns
@@ -548,10 +556,12 @@ function run_relaxed_LP!(
     gap_vector                   ::AbstractVector{U},
     ltr                          ::U,
     num_constraints              ::Int,
+    first_paired_row             ::Int,
     cont_inf_gap_ctrbtns         ::Vector{U},
     rough_bounds_cont_val        ::U,
     lp_sub_model                 ::JuMP.Model,
     lp_constraint_refs           ::Vector{JuMP.ConstraintRef},
+    lp_rhs                       ::Vector{U},
     timing_stats                 ::TimingStats
 ) where{U<:Real}
 
@@ -564,11 +574,8 @@ function run_relaxed_LP!(
     end
 
     #update the rhs of the constraints
-    @inbounds for row_idx in 1:num_constraints
-        # println("Real RHS:", coefficient_matrix_rhs_vector[row_idx], " Gap Matrix:", gap_matrix[row_idx, node_idx] , " Continuous Contribution Removal:", cont_inf_gap_ctrbtns[row_idx])
-        new_rhs = gap_vector[row_idx] - cont_inf_gap_ctrbtns[row_idx]
-        set_normalized_rhs(lp_constraint_refs[row_idx], new_rhs)
-    end
+    lp_rhs .= gap_vector .- cont_inf_gap_ctrbtns
+    set_LP_rhs!(lp_rhs, first_paired_row, num_constraints, lp_constraint_refs)
 
     #check the solution against the best known solution
     @time_operation timing_stats post_relaxed_dd_true_LP begin
@@ -595,8 +602,8 @@ end
         infimum_gap_matrices::Matrix{U}, buffer_offset::Int,
         cont_inf_gap_ctrbtns::Vector{U}, rough_bounds_cont_val::U,
         lp_sub_model::JuMP.Model, lp_vars::Vector{JuMP.VariableRef},
-        lp_constraint_refs::Vector{JuMP.ConstraintRef},
-        num_cont_vars::Int, num_constraints::Int,
+        lp_constraint_refs::Vector{JuMP.ConstraintRef}, lp_rhs::Vector{U},
+        num_cont_vars::Int, num_constraints::Int, first_paired_row::Int,
         num_int_vars::Int, coefficient_matrix_int_cols::Matrix{U}, coefficient_matrix_rhs_vector::Vector{U},
         rel_path::Union{Vector{Z}, BitVector}, wrk_vec::Vector{U},
         timing_stats::TimingStats;
@@ -624,8 +631,10 @@ Each candidate path is checked against the original constraints before it is acc
 - `lp_sub_model::JuMP.Model`: LP model for continuous variables
 - `lp_vars::Vector{JuMP.VariableRef}`: References to LP variable objects
 - `lp_constraint_refs::Vector{JuMP.ConstraintRef}`: References to LP constraint objects
+- `lp_rhs::Vector{U}`: Working vector for the LP right-hand sides
 - `num_cont_vars::Int`: Number of continuous variables
 - `num_constraints::Int`: Number of constraints
+- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
 - `num_int_vars::Int`: Number of integer variables
 - `coefficient_matrix_int_cols::Matrix{U}`: Coefficient matrix for integer variables (for checking terminal paths)
 - `coefficient_matrix_rhs_vector::Vector{U}`: Right-hand side values for constraints (for checking terminal paths)
@@ -657,8 +666,10 @@ function handle_exact_terminal_nodes!(
     lp_sub_model                ::JuMP.Model,
     lp_vars                     ::Vector{JuMP.VariableRef},
     lp_constraint_refs          ::Vector{JuMP.ConstraintRef},
+    lp_rhs                      ::Vector{U},
     num_cont_vars               ::Int,
     num_constraints             ::Int,
+    first_paired_row            ::Int,
     num_int_vars                ::Int,
     coefficient_matrix_int_cols ::Matrix{U},
     coefficient_matrix_rhs_vector::Vector{U},
@@ -731,10 +742,12 @@ function handle_exact_terminal_nodes!(
                             inf_gap_col,
                             node_ltr,
                             num_constraints,
+                            first_paired_row,
                             cont_inf_gap_ctrbtns,
                             rough_bounds_cont_val,
                             lp_sub_model,
                             lp_constraint_refs,
+                            lp_rhs,
                             timing_stats
                         )
                     end
@@ -743,14 +756,14 @@ function handle_exact_terminal_nodes!(
                         total_obj_value = node_ltr + cont_contribution
 
                         if total_obj_value < bkv
-                            # Verify before accepting: the stored gaps are clamped, so the LP may have used a looser
-                            # right-hand side than this path really leaves. If any row was loosened by more than the
-                            # tolerance, re-solve with the exact right-hand side.
+                            # Verify before accepting: the stored gaps are clamped and crossed == pairs are moved to their
+                            # midpoint, so the LP may have used a looser right-hand side than this path really leaves. If any
+                            # row was loosened by more than the tolerance, re-solve with the exact right-hand side.
                             backtrack_exact_path!(rel_path, cur_layr_idx, node_idx, relaxed_dd, first_layer, preceeding_path)
                             compute_path_rhs!(wrk_vec, rel_path, coefficient_matrix_int_cols, coefficient_matrix_rhs_vector, num_int_vars, num_constraints)
                             rhs_was_loosened = false
                             @inbounds for row_idx in 1:num_constraints
-                                if wrk_vec[row_idx] < inf_gap_col[row_idx] - cont_inf_gap_ctrbtns[row_idx] - constraint_feasibility_tol
+                                if wrk_vec[row_idx] < lp_rhs[row_idx] - constraint_feasibility_tol
                                     rhs_was_loosened = true
                                     break
                                 end
@@ -794,11 +807,11 @@ end
         bks_int::Union{Vector{Z}, BitVector}, bks_cont::Vector{U},
         lb_matrix::Union{Matrix{Z}, BitMatrix}, ub_matrix::Union{Matrix{Z}, BitMatrix},
         ltr_matrix::Matrix{U}, ltt_matrix::Matrix{U}, num_int_vars::Int,
-        num_cont_vars::Int, num_constraints::Int, new_nodes::Vector{QueueNode{Z,U}},
+        num_cont_vars::Int, num_constraints::Int, first_paired_row::Int, new_nodes::Vector{QueueNode{Z,U}},
         first_layer::Int, preceeding_path::Union{Vector{Z}, BitVector}, cont_contribution::U,
         infimum_gap_matrices::Matrix{U}, buffer_offset::Int,
         cont_inf_gap_ctrbtns::Vector{U}, lp_sub_model::JuMP.Model,
-        lp_vars::Vector{JuMP.VariableRef}, lp_constraint_refs::Vector{JuMP.ConstraintRef},
+        lp_vars::Vector{JuMP.VariableRef}, lp_constraint_refs::Vector{JuMP.ConstraintRef}, lp_rhs::Vector{U},
         coefficient_matrix_int_cols::Matrix{U}, coefficient_matrix_rhs_vector::Vector{U},
         int_var_to_pos_rows::Dict{Int, Vector{Int}}, int_var_to_neg_rows::Dict{Int, Vector{Int}},
         lbs_int::Union{Vector{Z}, BitVector}, ubs_int::Union{Vector{Z}, BitVector},
@@ -824,6 +837,7 @@ layer, as each represents a unique exact path from the root.
 - `num_int_vars::Int`: Number of integer variables
 - `num_cont_vars::Int`: Number of continuous variables
 - `num_constraints::Int`: Number of constraints
+- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
 - `new_nodes::Vector{QueueNode{Z,U}}`: Output vector for new branch-and-bound queue nodes
 - `first_layer::Int`: Starting layer index for path reconstruction with preceding_path
 - `preceeding_path::Union{Vector{Z}, BitVector}`: Path values preceding the first layer
@@ -834,6 +848,7 @@ layer, as each represents a unique exact path from the root.
 - `lp_sub_model::JuMP.Model`: LP model for terminal node processing
 - `lp_vars::Vector{JuMP.VariableRef}`: LP variable references for continuous variables
 - `lp_constraint_refs::Vector{JuMP.ConstraintRef}`: LP constraint references
+- `lp_rhs::Vector{U}`: Working vector for the LP right-hand sides
 - `coefficient_matrix_int_cols::Matrix{U}`: Coefficient matrix for integer variables by constraints
 - `coefficient_matrix_rhs_vector::Vector{U}`: Right-hand side values for constraints
 - `int_var_to_pos_rows::Dict{Int, Vector{Int}}`: Mapping from integer variables to constraint rows with positive coefficients
@@ -865,6 +880,7 @@ function process_last_exact_layer!(
     num_int_vars            ::Int,
     num_cont_vars           ::Int,
     num_constraints         ::Int,
+    first_paired_row        ::Int,
     new_nodes               ::Vector{QueueNode{Z,U}},
     first_layer             ::Int,
     preceeding_path         ::Union{Vector{Z}, BitVector},
@@ -875,6 +891,7 @@ function process_last_exact_layer!(
     lp_sub_model            ::JuMP.Model,
     lp_vars                 ::Vector{JuMP.VariableRef},
     lp_constraint_refs      ::Vector{JuMP.ConstraintRef},
+    lp_rhs                  ::Vector{U},
     coefficient_matrix_int_cols::Matrix{U},
     coefficient_matrix_rhs_vector::Vector{U},
     int_var_to_pos_rows     ::Dict{Int, Vector{Int}},
@@ -911,8 +928,10 @@ function process_last_exact_layer!(
             lp_sub_model,
             lp_vars,
             lp_constraint_refs,
+            lp_rhs,
             num_cont_vars,
             num_constraints,
+            first_paired_row,
             num_int_vars,
             coefficient_matrix_int_cols,
             coefficient_matrix_rhs_vector,
@@ -961,7 +980,7 @@ function process_last_exact_layer!(
                 cont_contribution_version_two = compute_tighter_continuous_bound!(
                     scratch_path, coefficient_matrix_int_cols, coefficient_matrix_rhs_vector,
                     int_var_to_pos_rows, int_var_to_neg_rows, lbs_int, ubs_int, num_int_vars, num_cont_vars, num_constraints,
-                    lp_sub_model, lp_constraint_refs, cont_contribution, wrk_vec, timing_stats
+                    first_paired_row, lp_sub_model, lp_constraint_refs, cont_contribution, wrk_vec, timing_stats
                 )
             end
 

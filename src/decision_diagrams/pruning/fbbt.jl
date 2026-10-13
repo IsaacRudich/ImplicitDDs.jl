@@ -3,7 +3,7 @@ COMMENTS UP TO DATE
 """
 
 """
-    fbbt_bound_tightening!(ubs_int::Union{Vector{Z}, BitVector}, lbs_int::Union{Vector{Z}, BitVector}, ubs_cont::Vector{T}, lbs_cont::Vector{T}, coefficient_matrix_int_cols::Matrix{T}, coefficient_matrix_cont_cols::Matrix{T}, int_var_to_pos_rows::Dict{Int, Vector{Int}}, int_var_to_neg_rows::Dict{Int, Vector{Int}}, int_var_to_zero_rows::Dict{Int, Vector{Int}}, cont_var_to_pos_rows::Dict{Int, Vector{Int}}, cont_var_to_neg_rows::Dict{Int, Vector{Int}}, infimum_gaps::Vector{T}, cont_inf_gap_ctrbtns::Vector{T}, num_int_vars::Int, num_cont_vars::Int, gap_adjustments::Array{T,3}; max_iterations::Int = 10, tolerance::U = 1e-3) where {Z<:Integer, T<:Real, U<:AbstractFloat}
+    fbbt_bound_tightening!(ubs_int::Union{Vector{Z}, BitVector}, lbs_int::Union{Vector{Z}, BitVector}, ubs_cont::Vector{T}, lbs_cont::Vector{T}, coefficient_matrix_int_cols::Matrix{T}, coefficient_matrix_cont_cols::Matrix{T}, int_var_to_pos_rows::Dict{Int, Vector{Int}}, int_var_to_neg_rows::Dict{Int, Vector{Int}}, int_var_to_zero_rows::Dict{Int, Vector{Int}}, cont_var_to_pos_rows::Dict{Int, Vector{Int}}, cont_var_to_neg_rows::Dict{Int, Vector{Int}}, infimum_gaps::Vector{T}, cont_inf_gap_ctrbtns::Vector{T}, num_int_vars::Int, num_cont_vars::Int, gap_adjustments::Array{T,3}; max_iterations::Int = 10, tolerance::U = 1e-3, integer_rounding_tol::T, constraint_feasibility_tol::T) where {Z<:Integer, T<:Real, U<:AbstractFloat}
 
 Performs Feasibility-Based Bound Tightening (FBBT) to strengthen variable bounds through constraint-based propagation for mixed-integer problems.
 
@@ -35,6 +35,8 @@ For each constraint `A_{iS}x_S + a_{ik}x_k ≤ b_i`:
 - `gap_adjustments::Array{T,3}`: Precomputed gap adjustment lookup table [num_constraints, max_domain_size, num_int_vars] (populated at end of FBBT with final tightened bounds)
 - `max_iterations::Int`: Maximum number of propagation iterations (default: 10)
 - `tolerance::U`: Minimum bound improvement to continue iterations for continuous variables (default: 1e-3)
+- `integer_rounding_tol::T`: Slack allowed when rounding computed bounds on integer variables
+- `constraint_feasibility_tol::T`: Amount by which a constraint may be violated when a continuous bound crosses the other bound
 
 # Returns
 - `Tuple{Bool, Bool, Int}`: A tuple containing:
@@ -69,7 +71,9 @@ function fbbt_bound_tightening!(
     num_cont_vars                ::Int,
     gap_adjustments              ::Array{T,3};
     max_iterations               ::Int = 10,
-    tolerance                    ::U = 1e-3
+    tolerance                    ::U = 1e-3,
+    integer_rounding_tol         ::T,
+    constraint_feasibility_tol   ::T
 ) where {Z<:Integer, T<:Real, U<:AbstractFloat}
 
     # Determine the integer type for floor/ceil operations
@@ -108,20 +112,23 @@ function fbbt_bound_tightening!(
 
             if ubs_int[var_idx] != current_bound_upper
                 # Check if new bound would be infeasible before trying to convert
-                new_upper_bound_real = floor(current_bound_upper)
+                new_upper_bound_real = floor(current_bound_upper + integer_rounding_tol)
                 if new_upper_bound_real < lbs_int[var_idx]
                     # Infeasible: upper bound is less than lower bound
                     return false, bounds_improved, iteration
                 end
 
-                # Update infimum gaps before overwriting old bound
-                new_upper_bound = floor(IntType, current_bound_upper)
-                for row_idx in neg_rows  # negative coefficients use upper bounds
-                    infimum_gaps[row_idx] += coefficient_matrix_int_cols[row_idx, var_idx] * (ubs_int[var_idx] - new_upper_bound)
+                new_upper_bound = floor(IntType, current_bound_upper + integer_rounding_tol)
+                # The slack can round back to the current bound, which is not an improvement
+                if new_upper_bound != ubs_int[var_idx]
+                    # Update infimum gaps before overwriting old bound
+                    for row_idx in neg_rows  # negative coefficients use upper bounds
+                        infimum_gaps[row_idx] += coefficient_matrix_int_cols[row_idx, var_idx] * (ubs_int[var_idx] - new_upper_bound)
+                    end
+                    ubs_int[var_idx] = new_upper_bound
+                    iter_bounds_improved = true
                 end
-                ubs_int[var_idx] = new_upper_bound
                 current_bound_upper = new_upper_bound  # Update for lower bound calculations
-                iter_bounds_improved = true
             end
 
             # Step c: Derive bounds from negative coefficient constraints (lower bounds)
@@ -136,19 +143,22 @@ function fbbt_bound_tightening!(
 
             if lbs_int[var_idx] != current_bound_lower
                 # Check if new bound would be infeasible before trying to convert
-                new_lower_bound_real = ceil(current_bound_lower)
+                new_lower_bound_real = ceil(current_bound_lower - integer_rounding_tol)
                 if new_lower_bound_real > ubs_int[var_idx]
                     # Infeasible: lower bound exceeds upper bound
                     return false, bounds_improved, iteration
                 end
 
-                # Update infimum gaps before overwriting old bound
-                new_lower_bound = ceil(IntType, current_bound_lower)
-                for row_idx in pos_rows  # positive coefficients use lower bounds
-                    infimum_gaps[row_idx] += coefficient_matrix_int_cols[row_idx, var_idx] * (lbs_int[var_idx] - new_lower_bound)
+                new_lower_bound = ceil(IntType, current_bound_lower - integer_rounding_tol)
+                # The slack can round back to the current bound, which is not an improvement
+                if new_lower_bound != lbs_int[var_idx]
+                    # Update infimum gaps before overwriting old bound
+                    for row_idx in pos_rows  # positive coefficients use lower bounds
+                        infimum_gaps[row_idx] += coefficient_matrix_int_cols[row_idx, var_idx] * (lbs_int[var_idx] - new_lower_bound)
+                    end
+                    lbs_int[var_idx] = new_lower_bound
+                    iter_bounds_improved = true
                 end
-                lbs_int[var_idx] = new_lower_bound
-                iter_bounds_improved = true
             end
         end
 
@@ -163,6 +173,7 @@ function fbbt_bound_tightening!(
             neg_rows = cont_var_to_neg_rows[var_idx]
 
             # Step c: Derive bounds from positive coefficient constraints (upper bounds)
+            ub_row_coeff = zero(T)
             for row_idx in pos_rows
                 # Add back this variable's contribution to get gap excluding this variable
                 # Compute potential upper bounds: x_k ≤ adjusted_gap / coeff
@@ -170,7 +181,16 @@ function fbbt_bound_tightening!(
 
                 if potential_upper_bound < current_bound_upper
                     current_bound_upper = potential_upper_bound
+                    ub_row_coeff = coefficient_matrix_cont_cols[row_idx, var_idx]
                 end
+            end
+
+            # An upper bound below the lower bound means its row is violated by (crossing * coeff)
+            if current_bound_upper < current_bound_lower
+                if (current_bound_lower - current_bound_upper) * ub_row_coeff > constraint_feasibility_tol
+                    return false, bounds_improved, iteration
+                end
+                current_bound_upper = current_bound_lower
             end
 
             if ubs_cont[var_idx] != current_bound_upper
@@ -189,13 +209,23 @@ function fbbt_bound_tightening!(
             end
 
             # Step c: Derive bounds from negative coefficient constraints (lower bounds)
+            lb_row_coeff = zero(T)
             for row_idx in neg_rows
                 # Compute potential lower bounds: x_k ≥ adjusted_gap / coeff
                 potential_lower_bound = (infimum_gaps[row_idx] / coefficient_matrix_cont_cols[row_idx, var_idx]) + current_bound_upper
 
                 if potential_lower_bound > current_bound_lower
                     current_bound_lower = potential_lower_bound
+                    lb_row_coeff = coefficient_matrix_cont_cols[row_idx, var_idx]
                 end
+            end
+
+            # A lower bound above the upper bound means its row is violated by (crossing * -coeff)
+            if current_bound_lower > current_bound_upper
+                if (current_bound_lower - current_bound_upper) * -lb_row_coeff > constraint_feasibility_tol
+                    return false, bounds_improved, iteration
+                end
+                current_bound_lower = current_bound_upper
             end
 
             if lbs_cont[var_idx] != current_bound_lower
@@ -211,11 +241,6 @@ function fbbt_bound_tightening!(
                 if improvement > tolerance
                     iter_bounds_improved = true
                 end
-            end
-
-            # Check for infeasibility
-            if lbs_cont[var_idx] > ubs_cont[var_idx]
-                return false, bounds_improved, iteration
             end
         end
 

@@ -19,7 +19,7 @@ COMMENTS UP TO DATE
         node_bin_counts::Matrix{<:Integer}, node_cumulative::Matrix{<:Integer},
         global_lower::Vector{<:Integer}, global_upper::Vector{<:Integer},
         bins_matrix::Matrix{<:Integer},
-        w::Int, timing_stats::TimingStats, time_remaining::Union{Float64, Nothing} = nothing
+        w::Int, timing_stats::TimingStats, time_remaining::Union{Float64, Nothing} = nothing; integer_rounding_tol::T
     ) where {Z<:Integer, T<:Real}
 
 Constructs a relaxed decision diagram by node separation iteratively top-down.
@@ -57,6 +57,7 @@ Constructs a relaxed decision diagram by node separation iteratively top-down.
 - `w::Int`: Maximum width (node limit) for each layer
 - `timing_stats::TimingStats`: Timing statistics tracker for relaxed DD operations
 - `time_remaining::Union{Float64, Nothing}`: Time budget in seconds for this function (nothing if no time limit)
+- `integer_rounding_tol::T`: Slack allowed when rounding computed bounds on integer variables
 
 # Returns
 - `Tuple{NodeLayer{Z}, Int, Int}`: A tuple containing:
@@ -112,7 +113,8 @@ Iteratively constructs relaxed DD layers by:
     #settings
     w                   ::Int,
     timing_stats::TimingStats,
-    time_remaining      ::Union{Float64, Nothing} = nothing
+    time_remaining      ::Union{Float64, Nothing} = nothing;
+    integer_rounding_tol::T
 )where{Z<:Integer, T<:Real}
     fn_start = time()
 
@@ -146,7 +148,8 @@ Iteratively constructs relaxed DD layers by:
             #compute the bounds on x_{i+1} implied by each node on layer i
             compute_implied_column_bounds!(
                 lb_matrix, ub_matrix, next_index, infimum_gap_matrices, buffer_offset,
-                int_var_to_pos_rows, int_var_to_neg_rows, lbs_int, ubs_int, inv_coeff, node_matrix[var_index]
+                int_var_to_pos_rows, int_var_to_neg_rows, lbs_int, ubs_int, inv_coeff, node_matrix[var_index];
+                integer_rounding_tol = integer_rounding_tol
             )
         end
     
@@ -329,7 +332,7 @@ end
         ubs_int::Union{Vector{Z}, BitVector}, lbs_int::Union{Vector{Z}, BitVector},
         original_lbs_int::Union{Vector{Z}, BitVector},
         bkv::T, bks_int::Union{Vector{Z}, BitVector}, bks_cont::Vector{T},
-        num_int_vars::Int, num_cont_vars::Int, num_constraints::Int,
+        num_int_vars::Int, num_cont_vars::Int, num_constraints::Int, first_paired_row::Int,
         rough_bounds_int::Vector{T}, rough_bounds_cont_val::T,
         base_infimum_gaps::Vector{T}, infimum_gap_matrices::Matrix{T},
         node_matrix::Vector{NodeLayer{Z}}, extra_layer::NodeLayer{Z},
@@ -344,8 +347,8 @@ end
         bins_matrix::Matrix{<:Integer},
         queue_nodes::Vector{QueueNode{Z,T}}, fc_new_nodes::Vector{QueueNode{Z,T}},
         lp_sub_model::JuMP.Model,
-        lp_vars::Vector{JuMP.VariableRef}, lp_constraint_refs::Vector{JuMP.ConstraintRef},
-        w::Int, timing_stats::TimingStats; debug_mode::Bool = false, time_remaining::Union{Float64, Nothing} = nothing, constraint_feasibility_tol::T
+        lp_vars::Vector{JuMP.VariableRef}, lp_constraint_refs::Vector{JuMP.ConstraintRef}, lp_rhs::Vector{T},
+        w::Int, timing_stats::TimingStats; debug_mode::Bool = false, time_remaining::Union{Float64, Nothing} = nothing, constraint_feasibility_tol::T, integer_rounding_tol::T
     ) where {Z<:Integer, T<:Real}
 
 Executes the complete relaxed decision diagram solution bounding process for mixed-integer programming problems.
@@ -389,6 +392,7 @@ Integrates three core phases to solve mixed-integer programs via relaxed decisio
 - `num_int_vars::Int`: Number of integer variables
 - `num_cont_vars::Int`: Number of continuous variables
 - `num_constraints::Int`: Number of constraints
+- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
 - `rough_bounds_int::Vector{T}`: Rough bounds for integer variables
 - `rough_bounds_cont_val::T`: Rough bound estimate for continuous variables
 
@@ -422,6 +426,7 @@ Integrates three core phases to solve mixed-integer programs via relaxed decisio
 - `lp_sub_model::JuMP.Model`: LP model for continuous variable optimization
 - `lp_vars::Vector{JuMP.VariableRef}`: LP variable references
 - `lp_constraint_refs::Vector{JuMP.ConstraintRef}`: LP constraint references
+- `lp_rhs::Vector{T}`: Working vector for the LP right-hand sides
 
 ## Settings
 - `w::Int`: Maximum width for decision diagram layers
@@ -429,6 +434,7 @@ Integrates three core phases to solve mixed-integer programs via relaxed decisio
 - `debug_mode::Bool`: Enable debug output (default: false)
 - `time_remaining::Union{Float64, Nothing}`: Time budget in seconds for this function (nothing if no time limit)
 - `constraint_feasibility_tol::T`: Amount by which an accepted solution may violate each constraint
+- `integer_rounding_tol::T`: Slack allowed when rounding computed bounds on integer variables
 """
 function setup_run_process_relaxed_dd!(
     # problem description
@@ -451,6 +457,7 @@ function setup_run_process_relaxed_dd!(
     num_int_vars                 ::Int,
     num_cont_vars                ::Int,
     num_constraints              ::Int,
+    first_paired_row             ::Int,
     rough_bounds_int             ::Vector{T},
     rough_bounds_cont_val        ::T,
 
@@ -484,13 +491,15 @@ function setup_run_process_relaxed_dd!(
     lp_sub_model                 ::JuMP.Model,
     lp_vars                      ::Vector{JuMP.VariableRef},
     lp_constraint_refs           ::Vector{JuMP.ConstraintRef},
+    lp_rhs                       ::Vector{T},
 
     # settings
     w::Int,
     timing_stats::TimingStats;
     debug_mode::Bool = false,
     time_remaining::Union{Float64, Nothing} = nothing,
-    constraint_feasibility_tol::T
+    constraint_feasibility_tol::T,
+    integer_rounding_tol::T
 ) where {Z<:Integer, T<:Real}
     fn_start = time()
     @time_operation timing_stats relaxed_dd begin
@@ -542,7 +551,8 @@ function setup_run_process_relaxed_dd!(
                 bins_matrix,
                 w,
                 timing_stats,
-                calculate_child_time_budget(time_remaining, fn_start)
+                calculate_child_time_budget(time_remaining, fn_start);
+                integer_rounding_tol = integer_rounding_tol
             )
         end
 
@@ -568,6 +578,7 @@ function setup_run_process_relaxed_dd!(
                 num_int_vars,
                 num_cont_vars,
                 num_constraints,
+                first_paired_row,
 
                 ltr_matrix,
                 ltt_matrix,
@@ -592,6 +603,7 @@ function setup_run_process_relaxed_dd!(
                 lp_sub_model,
                 lp_vars,
                 lp_constraint_refs,
+                lp_rhs,
                 timing_stats,
                 debug_mode = debug_mode,
                 time_remaining = calculate_child_time_budget(time_remaining, fn_start),
@@ -613,7 +625,7 @@ end
         ubs_int::Union{Vector{Z}, BitVector}, lbs_int::Union{Vector{Z}, BitVector},
         original_lbs_int::Union{Vector{Z}, BitVector},
         bkv::T, bks_int::Union{Vector{Z}, BitVector}, bks_cont::Vector{T}, qnode::QueueNode,
-        num_int_vars::Int, num_cont_vars::Int, num_constraints::Int,
+        num_int_vars::Int, num_cont_vars::Int, num_constraints::Int, first_paired_row::Int,
         rough_bounds_int::Vector{T}, rough_bounds_cont_val::T,
         base_infimum_gaps::Vector{T}, infimum_gap_matrices::Matrix{T},
         node_matrix::Vector{NodeLayer{Z}}, extra_layer::NodeLayer{Z},
@@ -627,8 +639,8 @@ end
         global_lower::Vector{<:Integer}, global_upper::Vector{<:Integer},
         bins_matrix::Matrix{<:Integer},
         queue_nodes::Vector{QueueNode{Z,T}}, fc_new_nodes::Vector{QueueNode{Z,T}},
-        lp_sub_model, lp_vars, lp_constraint_refs,
-        w, timing_stats::TimingStats; debug_mode::Bool = false, time_remaining::Union{Float64, Nothing} = nothing, constraint_feasibility_tol::T
+        lp_sub_model, lp_vars, lp_constraint_refs, lp_rhs,
+        w, timing_stats::TimingStats; debug_mode::Bool = false, time_remaining::Union{Float64, Nothing} = nothing, constraint_feasibility_tol::T, integer_rounding_tol::T
     ) where {Z<:Integer, T<:Real}
 
 Executes the complete relaxed decision diagram solution bounding process for mixed-integer programming problems.
@@ -661,6 +673,7 @@ from that starting point, and extracts bounds and solution improvements.
 - `num_int_vars::Int`: Number of integer variables
 - `num_cont_vars::Int`: Number of continuous variables
 - `num_constraints::Int`: Number of constraints
+- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
 - `rough_bounds_int::Vector{T}`: Rough bounds for integer variables
 - `rough_bounds_cont_val::T`: Rough bound estimate for continuous variables
 
@@ -694,6 +707,7 @@ from that starting point, and extracts bounds and solution improvements.
 - `lp_sub_model`: LP model for continuous variable optimization
 - `lp_vars`: LP variable references
 - `lp_constraint_refs`: LP constraint references
+- `lp_rhs::Vector{T}`: Working vector for the LP right-hand sides
 
 ## Settings
 - `w`: Maximum width for decision diagram layers
@@ -701,6 +715,7 @@ from that starting point, and extracts bounds and solution improvements.
 - `debug_mode::Bool`: Enable debug output (default: false)
 - `time_remaining::Union{Float64, Nothing}`: Time budget in seconds for this function (nothing if no time limit)
 - `constraint_feasibility_tol::T`: Amount by which an accepted solution may violate each constraint
+- `integer_rounding_tol::T`: Slack allowed when rounding computed bounds on integer variables
 
 # Returns
 - `Tuple{T, Bool, NodeLayer}`: A tuple containing:
@@ -735,6 +750,7 @@ function setup_run_process_relaxed_dd!(
     num_int_vars::Int,
     num_cont_vars::Int,
     num_constraints::Int,
+    first_paired_row::Int,
     rough_bounds_int::Vector{T},
     rough_bounds_cont_val::T,
 
@@ -768,13 +784,15 @@ function setup_run_process_relaxed_dd!(
     lp_sub_model,
     lp_vars,
     lp_constraint_refs,
+    lp_rhs::Vector{T},
 
     # settings
     w,
     timing_stats::TimingStats;
     debug_mode::Bool = false,
     time_remaining::Union{Float64, Nothing} = nothing,
-    constraint_feasibility_tol::T
+    constraint_feasibility_tol::T,
+    integer_rounding_tol::T
 ) where {Z<:Integer, T<:Real}
     fn_start = time()
     @time_operation timing_stats relaxed_dd begin
@@ -823,7 +841,8 @@ function setup_run_process_relaxed_dd!(
                 bins_matrix,
                 w,
                 timing_stats,
-                calculate_child_time_budget(time_remaining, fn_start)
+                calculate_child_time_budget(time_remaining, fn_start);
+                integer_rounding_tol = integer_rounding_tol
             )
         end
 
@@ -849,6 +868,7 @@ function setup_run_process_relaxed_dd!(
                 num_int_vars,
                 num_cont_vars,
                 num_constraints,
+                first_paired_row,
 
                 ltr_matrix,
                 ltt_matrix,
@@ -873,6 +893,7 @@ function setup_run_process_relaxed_dd!(
                 lp_sub_model,
                 lp_vars,
                 lp_constraint_refs,
+                lp_rhs,
                 timing_stats,
                 debug_mode = debug_mode,
                 time_remaining = calculate_child_time_budget(time_remaining, fn_start),

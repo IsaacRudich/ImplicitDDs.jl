@@ -16,7 +16,7 @@ Builds a dense coefficient matrix from a MOI model's linear constraints, normali
 - `U::Type{<:AbstractFloat}`: Float type for the output matrices
 
 # Returns
-- `Tuple{Matrix{U}, Dict{Int,Vector{Int}}, Dict{Int,Vector{Int}}, Dict{Int,Vector{Int}}, Matrix{U}, Dict{Int,Vector{Int}}, Dict{Int,Vector{Int}}, Dict{Int,Vector{Int}}, Vector{U}}`: A tuple containing:
+- `Tuple{Matrix{U}, Dict{Int,Vector{Int}}, Dict{Int,Vector{Int}}, Dict{Int,Vector{Int}}, Matrix{U}, Dict{Int,Vector{Int}}, Dict{Int,Vector{Int}}, Dict{Int,Vector{Int}}, Vector{U}, Int}`: A tuple containing:
   1. `Matrix{U}`: Dense matrix for integer variable coefficients
   2. `Dict{Int,Vector{Int}}`: Mapping integer variable indices to positive coefficient row indices
   3. `Dict{Int,Vector{Int}}`: Mapping integer variable indices to negative coefficient row indices
@@ -26,6 +26,7 @@ Builds a dense coefficient matrix from a MOI model's linear constraints, normali
   7. `Dict{Int,Vector{Int}}`: Mapping continuous variable indices to negative coefficient row indices
   8. `Dict{Int,Vector{Int}}`: Mapping continuous variable indices to zero coefficient row indices
   9. `Vector{U}`: RHS vector
+  10. `Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
 """
 function get_coefficient_matrix(model::MathOptInterface.Utilities.GenericModel, int_var_order::Vector{MOI.VariableIndex}, cont_var_order::Vector{MOI.VariableIndex}, ::Type{T}, ::Type{U}) where {T<:AbstractFloat, U<:AbstractFloat}
     leq_cons = MOI.get(model, MOI.ListOfConstraintIndices{MOI.ScalarAffineFunction{T}, MOI.LessThan{T}}())
@@ -188,7 +189,10 @@ function get_coefficient_matrix(model::MathOptInterface.Utilities.GenericModel, 
     end
     
 
-    return constraint_matrix_int_cols, int_var_to_pos_rows, int_var_to_neg_rows, int_var_to_zero_rows, constraint_matrix_cont_cols, cont_var_to_pos_rows, cont_var_to_neg_rows, cont_var_to_zero_rows, constraint_matrix_rhs_vector
+    # == constraints are stored last, as pairs of rows
+    first_paired_row = length(leq_cons) + length(geq_cons) + 1
+
+    return constraint_matrix_int_cols, int_var_to_pos_rows, int_var_to_neg_rows, int_var_to_zero_rows, constraint_matrix_cont_cols, cont_var_to_pos_rows, cont_var_to_neg_rows, cont_var_to_zero_rows, constraint_matrix_rhs_vector, first_paired_row
 end
 
 
