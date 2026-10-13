@@ -166,9 +166,10 @@ function build_variable_adjacency_from_moi(
     leq_cons = MOI.get(model, MOI.ListOfConstraintIndices{MOI.ScalarAffineFunction{T}, MOI.LessThan{T}}())
     eq_cons = MOI.get(model, MOI.ListOfConstraintIndices{MOI.ScalarAffineFunction{T}, MOI.EqualTo{T}}())
     geq_cons = MOI.get(model, MOI.ListOfConstraintIndices{MOI.ScalarAffineFunction{T}, MOI.GreaterThan{T}}())
+    interval_cons = MOI.get(model, MOI.ListOfConstraintIndices{MOI.ScalarAffineFunction{T}, MOI.Interval{T}}())
 
     # Process each constraint type
-    all_constraints = [leq_cons; eq_cons; geq_cons]
+    all_constraints = [leq_cons; eq_cons; geq_cons; interval_cons]
 
     int_vars_in_constraint = Vector{Int}()
     sizehint!(int_vars_in_constraint, num_int_vars)

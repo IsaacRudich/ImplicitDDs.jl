@@ -37,7 +37,7 @@ Processes a relaxed decision diagram to extract bounds, find optimal solutions, 
 - `num_int_vars::Int`: Number of integer variables
 - `num_cont_vars::Int`: Number of continuous variables
 - `num_constraints::Int`: Number of constraints
-- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
+- `first_paired_row::Int`: Index of the first paired row (each == constraint and each two-sided constraint with both sides finite is stored as a pair of rows)
 - `ltr_matrix::Matrix{V}`: Length-to-root matrix with costs from root
 - `ltt_matrix::Matrix{V}`: Length-to-terminal matrix with cost-to-go estimates
 - `lb_matrix::Union{Matrix{Z}, BitMatrix}`: Lower bound matrix for feasible transitions
@@ -538,7 +538,7 @@ Computes the continuous variable contribution to the relaxed bound by solving an
 - `gap_vector::AbstractVector{U}`: Infimum gaps representing relaxed constraint states
 - `ltr::U`: shortest length-to-root value from terminal nodes
 - `num_constraints::Int`: Number of constraints in the problem
-- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
+- `first_paired_row::Int`: Index of the first paired row (each == constraint and each two-sided constraint with both sides finite is stored as a pair of rows)
 - `cont_inf_gap_ctrbtns::Vector{U}`: Continuous variable contributions to infimum gaps
 - `rough_bounds_cont_val::U`: Rough bound estimate for continuous variables
 - `lp_sub_model::JuMP.Model`: LP model for continuous variables
@@ -634,7 +634,7 @@ Each candidate path is checked against the original constraints before it is acc
 - `lp_rhs::Vector{U}`: Working vector for the LP right-hand sides
 - `num_cont_vars::Int`: Number of continuous variables
 - `num_constraints::Int`: Number of constraints
-- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
+- `first_paired_row::Int`: Index of the first paired row (each == constraint and each two-sided constraint with both sides finite is stored as a pair of rows)
 - `num_int_vars::Int`: Number of integer variables
 - `coefficient_matrix_int_cols::Matrix{U}`: Coefficient matrix for integer variables (for checking terminal paths)
 - `coefficient_matrix_rhs_vector::Vector{U}`: Right-hand side values for constraints (for checking terminal paths)
@@ -837,7 +837,7 @@ layer, as each represents a unique exact path from the root.
 - `num_int_vars::Int`: Number of integer variables
 - `num_cont_vars::Int`: Number of continuous variables
 - `num_constraints::Int`: Number of constraints
-- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
+- `first_paired_row::Int`: Index of the first paired row (each == constraint and each two-sided constraint with both sides finite is stored as a pair of rows)
 - `new_nodes::Vector{QueueNode{Z,U}}`: Output vector for new branch-and-bound queue nodes
 - `first_layer::Int`: Starting layer index for path reconstruction with preceding_path
 - `preceeding_path::Union{Vector{Z}, BitVector}`: Path values preceding the first layer

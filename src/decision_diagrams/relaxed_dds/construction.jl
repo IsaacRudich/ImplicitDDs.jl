@@ -392,7 +392,7 @@ Integrates three core phases to solve mixed-integer programs via relaxed decisio
 - `num_int_vars::Int`: Number of integer variables
 - `num_cont_vars::Int`: Number of continuous variables
 - `num_constraints::Int`: Number of constraints
-- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
+- `first_paired_row::Int`: Index of the first paired row (each == constraint and each two-sided constraint with both sides finite is stored as a pair of rows)
 - `rough_bounds_int::Vector{T}`: Rough bounds for integer variables
 - `rough_bounds_cont_val::T`: Rough bound estimate for continuous variables
 
@@ -673,7 +673,7 @@ from that starting point, and extracts bounds and solution improvements.
 - `num_int_vars::Int`: Number of integer variables
 - `num_cont_vars::Int`: Number of continuous variables
 - `num_constraints::Int`: Number of constraints
-- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
+- `first_paired_row::Int`: Index of the first paired row (each == constraint and each two-sided constraint with both sides finite is stored as a pair of rows)
 - `rough_bounds_int::Vector{T}`: Rough bounds for integer variables
 - `rough_bounds_cont_val::T`: Rough bound estimate for continuous variables
 

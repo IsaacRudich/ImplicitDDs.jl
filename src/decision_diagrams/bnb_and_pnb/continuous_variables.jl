@@ -100,7 +100,7 @@ Computes a tighter bound on the contribution of the continuous variables given a
 - `ubs_int::Union{Vector{Z}, BitVector}`: Upper bounds for integer variables
 - `num_int_vars::Int`: Total number of integer variables
 - `num_constraints::Int`: Number of constraints
-- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
+- `first_paired_row::Int`: Index of the first paired row (each == constraint and each two-sided constraint with both sides finite is stored as a pair of rows)
 - `lp_sub_model::JuMP.Model`: Existing LP model for continuous variable optimization
 - `lp_constraint_refs::Vector{JuMP.ConstraintRef}`: References to LP constraint objects for RHS updates
 - `rough_bounds_cont_val::T`: Fallback bound value if LP is infeasible
@@ -320,11 +320,11 @@ end
 """
     set_LP_rhs!(lp_rhs::Vector{U}, first_paired_row::Int, num_constraints::Int, lp_constraint_refs::Vector{JuMP.ConstraintRef}) where {U<:Real}
 
-Sets the right-hand sides of the LP subproblem, first moving the two rows of any crossed == constraint to their midpoint.
+Sets the right-hand sides of the LP subproblem, first moving any crossed pair of rows to their midpoint.
 
 # Arguments
 - `lp_rhs::Vector{U}`: Right-hand side for each constraint (crossed pairs are overwritten)
-- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
+- `first_paired_row::Int`: Index of the first paired row (each == constraint and each two-sided constraint with both sides finite is stored as a pair of rows)
 - `num_constraints::Int`: Number of constraints
 - `lp_constraint_refs::Vector{JuMP.ConstraintRef}`: References to LP constraint objects
 """
@@ -334,7 +334,7 @@ function set_LP_rhs!(
     num_constraints     ::Int,
     lp_constraint_refs  ::Vector{JuMP.ConstraintRef}
 ) where {U<:Real}
-    # The right-hand sides of an == pair can only sum below zero through rounding error
+    # The right-hand sides of a pair only sum below zero through rounding error, or a two-sided constraint that is empty within constraint_feasibility_tol
     @inbounds for row_idx in first_paired_row:2:num_constraints
         if lp_rhs[row_idx] + lp_rhs[row_idx + 1] < 0
             lp_rhs[row_idx] = (lp_rhs[row_idx] - lp_rhs[row_idx + 1]) / 2

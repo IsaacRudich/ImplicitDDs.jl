@@ -2,11 +2,11 @@
 # Supported constraint types
 # =============================================================================
 
-# Linear constraints: a'x <= b, a'x >= b, a'x == b
+# Linear constraints: a'x <= b, a'x >= b, a'x == b, lb <= a'x <= ub
 function MOI.supports_constraint(
     ::Optimizer,
     ::Type{MOI.ScalarAffineFunction{Float64}},
-    ::Type{<:Union{MOI.LessThan{Float64}, MOI.GreaterThan{Float64}, MOI.EqualTo{Float64}}},
+    ::Type{<:Union{MOI.LessThan{Float64}, MOI.GreaterThan{Float64}, MOI.EqualTo{Float64}, MOI.Interval{Float64}}},
 )
     return true
 end

@@ -199,6 +199,15 @@ function solve_mip(
 
     model, lbs_int, ubs_int, lbs_cont, ubs_cont, num_int_vars, num_cont_vars, num_constraints, int_obj_coeffs, cont_obj_coeffs, obj_const, coefficient_matrix_int_cols, int_var_to_pos_rows, int_var_to_neg_rows, int_var_to_zero_rows, coefficient_matrix_cont_cols, cont_var_to_pos_rows, cont_var_to_neg_rows, cont_var_to_zero_rows, coefficient_matrix_rhs_vector, first_paired_row, int_var_refs, cont_var_refs, sense_multiplier, inverse_order, conversion_time = setup_from_JuMP_model(model, numerical_precision, suppress_all_prints, debug_mode, custom_variable_order)
 
+    # A two-sided constraint whose lower side exceeds its upper side by more than the tolerance is infeasible
+    if any(coefficient_matrix_rhs_vector[row_idx] + coefficient_matrix_rhs_vector[row_idx + 1] < -constraint_feasibility_tol for row_idx in first_paired_row:2:num_constraints)
+        if !suppress_all_prints
+            println("\n", "Problem Infeasible: because a two-sided constraint has a lower bound greater than its upper bound")
+        end
+        finalize_and_log_timing!(timer_outputs, conversion_time, 0.0, true_start, log_file_path)
+        return return_infeasible(Int, numerical_precision, 0, time() - true_start, true, false)
+    end
+
     time_limit_start = time()
     time_limit_seconds = isnothing(time_limit) ? nothing : Float64(time_limit * 60)
 
@@ -1165,7 +1174,7 @@ Process a single queue node in the branch-and-bound loop by running restricted a
 - `num_int_vars::Int`: Number of integer variables
 - `num_cont_vars::Int`: Number of continuous variables
 - `num_constraints::Int`: Number of constraints
-- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
+- `first_paired_row::Int`: Index of the first paired row (each == constraint and each two-sided constraint with both sides finite is stored as a pair of rows)
 - `infimum_gaps::Vector{T}`: Global infimum gaps for each constraint
 - `cont_inf_gap_ctrbtns::Vector{T}`: Continuous variable contributions to infimum gaps
 - `bkv::T`: Current best known objective value
@@ -1385,7 +1394,7 @@ Converts a JuMP model into ImplicitDDs solver data structures with adaptive vari
   18. `Dict{Int, Vector{Int}}`: Continuous variable to negative coefficient rows mapping
   19. `Dict{Int, Vector{Int}}`: Continuous variable to zero coefficient rows mapping
   20. `Vector{T}`: Constraint RHS vector
-  21. `Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
+  21. `Int`: Index of the first paired row (each == constraint and each two-sided constraint with both sides finite is stored as a pair of rows)
   22. `Vector{JuMP.VariableRef}`: Ordered integer variable references
   23. `Vector{JuMP.VariableRef}`: Continuous variable references
   24. `Int`: Objective sense multiplier (+1 for Min, -1 for Max)
@@ -1416,6 +1425,15 @@ function setup_from_JuMP_model(model::JuMP.Model, precision::DataType, suppress_
 
     # Get all constraint types to determine coefficient type
     constraint_types = MOI.get(moi_model, MOI.ListOfConstraintTypesPresent())
+
+    # Refuse constraint types the conversion would otherwise ignore
+    for (func_type, set_type) in constraint_types
+        is_supported = (func_type <: MOI.ScalarAffineFunction && set_type <: Union{MOI.LessThan, MOI.GreaterThan, MOI.EqualTo, MOI.Interval}) ||
+                       (func_type == MOI.VariableIndex && set_type <: Union{MOI.LessThan, MOI.GreaterThan, MOI.EqualTo, MOI.Interval, MOI.Integer, MOI.ZeroOne})
+        if !is_supported
+            error("Constraints of type ", func_type, "-in-", set_type, " are not supported by ImplicitDDs")
+        end
+    end
     # Find the coefficient type from ScalarAffineFunction constraints
     coefficient_type = Float64  # default fallback
     for (func_type, set_type) in constraint_types

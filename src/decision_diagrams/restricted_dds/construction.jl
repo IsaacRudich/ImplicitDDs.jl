@@ -153,7 +153,7 @@ Initializes and constructs a complete restricted decision diagram from the root 
 - `num_int_vars::Int`: Number of integer variables
 - `num_cont_vars::Int`: Number of continuous variables
 - `num_constraints::Int`: Number of constraints in the problem
-- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
+- `first_paired_row::Int`: Index of the first paired row (each == constraint and each two-sided constraint with both sides finite is stored as a pair of rows)
 - `rough_bounds_int::Vector{T}`: Rough bound estimates for remaining integer variables (used for pruning)
 - `rough_bounds_cont_val::T`: Rough bound contribution from continuous variables
 - `infimum_gaps::Vector{T}`: Base infimum gap values before any variable assignments
@@ -286,7 +286,7 @@ Constructs a restricted decision diagram from a branch-and-bound queue node with
 - `num_int_vars::Int`: Number of integer variables
 - `num_cont_vars::Int`: Number of continuous variables
 - `num_constraints::Int`: Number of constraints in the problem
-- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
+- `first_paired_row::Int`: Index of the first paired row (each == constraint and each two-sided constraint with both sides finite is stored as a pair of rows)
 - `rough_bounds_int::Vector{T}`: Rough bound estimates for remaining integer variables (used for pruning)
 - `rough_bounds_cont_val::T`: Rough bound contribution from continuous variables
 - `infimum_gaps::Vector{T}`: Base infimum gap values for constraint state reconstruction
@@ -420,7 +420,7 @@ A solution that would improve bkv is verified against the original constraints b
 - `num_int_vars::Int`: Total number of integer variables
 - `num_cont_vars::Int`: Number of continuous variables
 - `num_constraints::Int`: Number of constraints in the problem
-- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
+- `first_paired_row::Int`: Index of the first paired row (each == constraint and each two-sided constraint with both sides finite is stored as a pair of rows)
 - `cont_inf_gap_ctrbtns::Vector{V}`: Continuous variable contributions to infimum gaps
 - `rough_bounds_cont_val::V`: Rough bound contribution from continuous variables
 - `lp_sub_model::JuMP.Model`: LP model for continuous variable optimization
@@ -527,7 +527,7 @@ A solution that would improve bkv is verified against the original constraints b
 - `num_int_vars::Int`: Number of integer variables (terminal layer index)
 - `num_cont_vars::Int`: Number of continuous variables
 - `num_constraints::Int`: Number of constraints in the problem
-- `first_paired_row::Int`: Index of the first paired row (each == constraint is stored as a pair of rows)
+- `first_paired_row::Int`: Index of the first paired row (each == constraint and each two-sided constraint with both sides finite is stored as a pair of rows)
 - `cont_inf_gap_ctrbtns::Vector{U}`: Continuous variable contributions to infimum gaps
 - `rough_bounds_cont_val::U`: Rough bound contribution from continuous variables (used for early termination)
 - `lp_sub_model::JuMP.Model`: LP model for continuous variable optimization
