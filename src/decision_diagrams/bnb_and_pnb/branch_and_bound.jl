@@ -422,7 +422,7 @@ function solve_mip(
                 rough_bounds_cont_val = numerical_precision(lp_obj_val)
             end
             # set_attribute(lp_sub_model, "presolve", "off")
-        else
+        elseif lp_is_infeasible(lp_sub_model)
             if !suppress_all_prints
                 println("\n", "Problem Infeasible: because LP Subproblem Infeasible")
             end

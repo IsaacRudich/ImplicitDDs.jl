@@ -641,6 +641,10 @@ function run_restricted_LPs!(
                         lp_is_optimal, cont_contribution = run_path_LP!(wrk_vec, num_constraints, lp_sub_model, lp_constraint_refs, timing_stats)
                     end
                     new_obj_value = cont_contribution + ltrs[node_idx]
+                    # Neither solved nor proven infeasible: this path is unresolved
+                    if !lp_is_optimal && !lp_is_infeasible(lp_sub_model)
+                        is_exact = false
+                    end
                 end
 
                 if lp_is_optimal && new_obj_value < bkv
@@ -656,6 +660,9 @@ function run_restricted_LPs!(
             else
                 is_feasible = true
             end
+        elseif !lp_is_infeasible(lp_sub_model)
+            # Neither solved nor proven infeasible: this path is unresolved
+            is_exact = false
         end
     end
 

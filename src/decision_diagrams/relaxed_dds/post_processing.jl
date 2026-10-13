@@ -140,7 +140,7 @@ Processes a relaxed decision diagram to extract bounds, find optimal solutions, 
         compute_terminal_infimum_gaps!(wrk_vec, infimum_gap_matrices, node_matrix, num_int_vars, num_constraints, buffer_offset)
 
         @time_operation timing_stats post_relaxed_dd_potential_top_level_LP begin
-            is_feasible, cont_contribution = run_relaxed_LP!(
+            is_feasible, cont_contribution, _ = run_relaxed_LP!(
                 bkv,
                 wrk_vec,
                 lowest_ltr,
@@ -547,9 +547,10 @@ Computes the continuous variable contribution to the relaxed bound by solving an
 - `timing_stats::TimingStats`: Timing statistics tracker for relaxed DD operations
 
 # Returns
-- `Tuple{Bool, U}`: A tuple containing:
-  1. `Bool`: True if LP subproblem was solved optimally, false otherwise
-  2. `U`: Objective contribution from continuous variables (zero if infeasible)
+- `Tuple{Bool, U, Bool}`: A tuple containing:
+  1. `Bool`: False if the node cannot improve bkv or the LP was proven infeasible, true otherwise
+  2. `U`: Objective contribution from continuous variables (the rough bound if the LP was not solved)
+  3. `Bool`: True if the LP was solved to optimality
 """
 function run_relaxed_LP!(
     bkv                          ::U,
@@ -567,10 +568,11 @@ function run_relaxed_LP!(
 
     is_feasible = false
     cont_contribution = zero(U)
+    is_solved = false
 
     # Skip if this node can't improve bkv
     if ltr + rough_bounds_cont_val >= bkv
-        return is_feasible, cont_contribution
+        return is_feasible, cont_contribution, is_solved
     end
 
     #update the rhs of the constraints
@@ -585,11 +587,16 @@ function run_relaxed_LP!(
 
     if termination_status(lp_sub_model) == MOI.OPTIMAL
         is_feasible = true
+        is_solved = true
 
         cont_contribution = U(objective_value(lp_sub_model))
+    elseif !lp_is_infeasible(lp_sub_model)
+        # Neither solved nor proven infeasible: the node cannot be pruned, and the rough bound is still valid
+        is_feasible = true
+        cont_contribution = rough_bounds_cont_val
     end
 
-    return is_feasible, cont_contribution
+    return is_feasible, cont_contribution, is_solved
 end
 
 
@@ -737,7 +744,7 @@ function handle_exact_terminal_nodes!(
 
                     # Solve the continuous subproblem for this specific integer assignment
                     @time_operation timing_stats post_relaxed_dd_potential_low_level_LP begin
-                        is_feasible, cont_contribution = run_relaxed_LP!(
+                        is_feasible, cont_contribution, is_solved = run_relaxed_LP!(
                             bkv,
                             inf_gap_col,
                             node_ltr,
@@ -750,6 +757,11 @@ function handle_exact_terminal_nodes!(
                             lp_rhs,
                             timing_stats
                         )
+                    end
+
+                    # A complete assignment whose LP is neither solved nor proven infeasible can be neither accepted nor ruled out
+                    if is_feasible && !is_solved
+                        error("LP subproblem for a complete integer assignment ended with status ", termination_status(lp_sub_model))
                     end
 
                     if is_feasible
@@ -773,6 +785,9 @@ function handle_exact_terminal_nodes!(
                                     @time_operation timing_stats post_relaxed_dd_true_LP begin
                                         is_feasible, cont_contribution = run_path_LP!(wrk_vec, num_constraints, lp_sub_model, lp_constraint_refs, timing_stats)
                                     end
+                                end
+                                if !is_feasible && !lp_is_infeasible(lp_sub_model)
+                                    error("LP subproblem for a complete integer assignment ended with status ", termination_status(lp_sub_model))
                                 end
                                 total_obj_value = node_ltr + cont_contribution
                             end

@@ -349,6 +349,20 @@ end
 
 
 """
+    lp_is_infeasible(lp_sub_model::JuMP.Model)
+
+True if the last solve of the LP subproblem proved it infeasible. INFEASIBLE_OR_UNBOUNDED counts, because every continuous variable has finite bounds.
+
+# Arguments
+- `lp_sub_model::JuMP.Model`: LP model for continuous variables, after `optimize!`
+"""
+function lp_is_infeasible(lp_sub_model::JuMP.Model)
+    status = termination_status(lp_sub_model)
+    return status == MOI.INFEASIBLE || status == MOI.INFEASIBLE_OR_UNBOUNDED
+end
+
+
+"""
     run_path_LP!(rhs::Vector{U}, num_constraints::Int, lp_sub_model::JuMP.Model, lp_constraint_refs::Vector{JuMP.ConstraintRef}, timing_stats::TimingStats) where {U<:Real}
 
 Solves the continuous subproblem with the given right-hand side, typically the exact one from `compute_path_rhs!`.
