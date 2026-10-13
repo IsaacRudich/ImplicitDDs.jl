@@ -165,19 +165,19 @@ function preallocate_dd_memory(
     coefficient_matrix_int_cols::Matrix{T}
 ) where {Z<:Integer, T<:Real}
     # Select integer type based on maximum values stored
-    # Type 1: Arrays bounded by w (arc_count_per_node, node_bin_counts, node_cumulative)
-    type_w = if relaxed_w <= typemax(Int8)
+    # Type 1: Arrays bounded by w (arc_count_per_node, node_bin_counts, node_cumulative, restricted_bins_matrix)
+    type_w = if w <= typemax(Int8)
         Int8
-    elseif relaxed_w <= typemax(Int16)
+    elseif w <= typemax(Int16)
         Int16
-    elseif relaxed_w <= typemax(Int32)
+    elseif w <= typemax(Int32)
         Int32
     else
         Int64
     end
 
-    # Type 2: Arrays bounded by K×w (global_lower, global_upper)
-    max_kw = relaxed_w * max_domain_size
+    # Type 2: Arrays bounded by K×w (global_lower, global_upper, bin_counts, cumulative_bins)
+    max_kw = w * max_domain_size
     type_kw = if max_kw <= typemax(Int8)
         Int8
     elseif max_kw <= typemax(Int16)
@@ -361,8 +361,8 @@ Only counts the buffers that scale with `max_domain_size`; their sizes must matc
 - `numerical_precision::DataType`: Float type used in the workspaces
 """
 function check_workspace_memory(num_workers::Int, num_int_vars::Int, num_constraints::Int, relaxed_w::Int, w::Int, max_domain_size::Int, numerical_precision::DataType)
-    # Matches type_w in preallocate_dd_memory: the smallest integer type that holds relaxed_w
-    bytes_w = relaxed_w <= typemax(Int8) ? 1 : relaxed_w <= typemax(Int16) ? 2 : relaxed_w <= typemax(Int32) ? 4 : 8
+    # Matches type_w in preallocate_dd_memory: the smallest integer type that holds w
+    bytes_w = w <= typemax(Int8) ? 1 : w <= typemax(Int16) ? 2 : w <= typemax(Int32) ? 4 : 8
     bytes_t = sizeof(numerical_precision)
 
     # Float64 so the products cannot overflow Int
