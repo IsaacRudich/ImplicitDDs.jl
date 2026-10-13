@@ -185,9 +185,10 @@ function fbbt_bound_tightening!(
                 end
             end
 
-            # An upper bound below the lower bound means its row is violated by (crossing * coeff)
+            # An upper bound below the lower bound means its row is violated by (crossing * coeff);
+            # with no such row (ub_row_coeff == 0) the declared bounds themselves cross
             if current_bound_upper < current_bound_lower
-                if (current_bound_lower - current_bound_upper) * ub_row_coeff > constraint_feasibility_tol
+                if ub_row_coeff == 0 || (current_bound_lower - current_bound_upper) * ub_row_coeff > constraint_feasibility_tol
                     return false, bounds_improved, iteration
                 end
                 current_bound_upper = current_bound_lower
@@ -220,9 +221,10 @@ function fbbt_bound_tightening!(
                 end
             end
 
-            # A lower bound above the upper bound means its row is violated by (crossing * -coeff)
+            # A lower bound above the upper bound means its row is violated by (crossing * -coeff);
+            # with no such row (lb_row_coeff == 0) the declared bounds themselves cross
             if current_bound_lower > current_bound_upper
-                if (current_bound_lower - current_bound_upper) * -lb_row_coeff > constraint_feasibility_tol
+                if lb_row_coeff == 0 || (current_bound_lower - current_bound_upper) * -lb_row_coeff > constraint_feasibility_tol
                     return false, bounds_improved, iteration
                 end
                 current_bound_lower = current_bound_upper
