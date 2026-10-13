@@ -249,3 +249,25 @@ function run_parallel_validation(n_tests::Int=5000; verbose=false)
         density=1.0, int_lb_range=(-2,-2), int_ub_range=(2,2), cont_domain_size=4.0
     )
 end
+
+
+"""
+    run_mixed_validation(n_tests::Int=5000; verbose=false)
+
+Run serial validation suite with == and two-sided constraints (small width, no parallelism).
+Uses: width=4, num_LPs=1, 6 int vars, 3 cont vars, 5 constraints (30% ==, 30% two-sided), int bounds [-1,2]
+"""
+function run_mixed_validation(n_tests::Int=5000; verbose=false)
+    run_validation_suite(n_tests;
+        verbose=verbose,
+        optimizer_attrs=Dict(
+            "relaxed_w" => 4,
+            "restricted_w" => 4,
+            "num_LPs_to_run" => 1,
+            "parallel_processing" => false
+        ),
+        n_int=6, n_cont=3, m=5,
+        density=0.7, int_lb_range=(-1,-1), int_ub_range=(2,2), cont_domain_size=4.0,
+        eq_fraction=0.3, two_sided_fraction=0.3
+    )
+end

@@ -7,4 +7,8 @@ include("test_utilities.jl")
         result = run_serial_validation(15)
         @test result.failed == 0
     end
+    @testset "Equality and Two-Sided Constraints" begin
+        result = run_mixed_validation(15)
+        @test result.failed == 0
+    end
 end

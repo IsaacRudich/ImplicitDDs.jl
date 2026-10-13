@@ -38,6 +38,8 @@ Generate a random mixed-integer programming problem with extensive control over 
 
 # Constraint Properties
 - `rhs_range::Tuple{Float64, Float64} = (-100.0, 100.0)`: Range for RHS values
+- `eq_fraction::Float64 = 0.0`: Fraction of constraints that are ==, with the RHS taken from a random point within the variable bounds
+- `two_sided_fraction::Float64 = 0.0`: Fraction of constraints that are two-sided around that random point (some with one infinite side)
 
 # Coefficient Distribution
 - `coeff_distribution::Symbol = :uniform`: How to generate coefficients
@@ -117,6 +119,8 @@ function generate_random_mip(;
 
     # Constraint properties
     rhs_range::Tuple{Float64, Float64} = (-100.0, 100.0),
+    eq_fraction::Float64 = 0.0,
+    two_sided_fraction::Float64 = 0.0,
 
     # Coefficient distribution
     coeff_distribution::Symbol = :uniform,
@@ -145,6 +149,7 @@ function generate_random_mip(;
     @assert n_int >= 0 && n_cont >= 0 "n_int and n_cont must be non-negative"
     @assert m >= 0 "m must be non-negative"
     @assert coefficient_scale > 0 "coefficient_scale must be positive"
+    @assert eq_fraction >= 0 && two_sided_fraction >= 0 && eq_fraction + two_sided_fraction <= 1 "eq_fraction and two_sided_fraction must be non-negative and sum to at most 1"
 
     # Set default ranges if not provided
     int_lb_range_actual = isnothing(int_lb_range) ? (0, int_domain_size-1) : int_lb_range
@@ -208,6 +213,34 @@ function generate_random_mip(;
     end
     c = c .* coefficient_scale
 
+    # Choose == and two-sided rows, with RHS around a random point within the bounds
+    # (drawn after everything else, so models without them are unchanged)
+    row_kind = fill(:leq, m)
+    row_lower = fill(-Inf, m)
+    row_upper = fill(Inf, m)
+    if eq_fraction > 0 || two_sided_fraction > 0
+        p0 = vcat([rand(int_lbs[i]:int_ubs[i]) for i in 1:n_int], [cont_lbs[i] + rand() * (cont_ubs[i] - cont_lbs[i]) for i in 1:n_cont])
+        lhs_at_p0 = A * p0
+        max_slack = 0.1 * (rhs_range[2] - rhs_range[1])
+        for i in 1:m
+            draw = rand()
+            if draw < eq_fraction
+                row_kind[i] = :eq
+                b[i] = lhs_at_p0[i]
+            elseif draw < eq_fraction + two_sided_fraction
+                row_kind[i] = :two_sided
+                row_lower[i] = lhs_at_p0[i] - rand() * max_slack
+                row_upper[i] = lhs_at_p0[i] + rand() * max_slack
+                side_draw = rand()
+                if side_draw < 0.1
+                    row_lower[i] = -Inf
+                elseif side_draw < 0.2
+                    row_upper[i] = Inf
+                end
+            end
+        end
+    end
+
     # Build JuMP model
     model = Model(HiGHS.Optimizer)
     set_silent(model)
@@ -221,11 +254,17 @@ function generate_random_mip(;
     # Combine variable references
     x_all = n_cont > 0 ? vcat(x_int, x_cont) : x_int
 
-    # Add constraints (all <=)
+    # Add constraints
     for i in 1:m
         row_indices = findnz(A[i, :])[1]
         if !isempty(row_indices)
-            @constraint(model, sum(A[i, j] * x_all[j] for j in row_indices) <= b[i])
+            if row_kind[i] == :eq
+                @constraint(model, sum(A[i, j] * x_all[j] for j in row_indices) == b[i])
+            elseif row_kind[i] == :two_sided
+                @constraint(model, row_lower[i] <= sum(A[i, j] * x_all[j] for j in row_indices) <= row_upper[i])
+            else
+                @constraint(model, sum(A[i, j] * x_all[j] for j in row_indices) <= b[i])
+            end
         end
     end
 
