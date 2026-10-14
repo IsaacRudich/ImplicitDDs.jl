@@ -270,10 +270,9 @@ end
 """
     prune_suboptimal_nodes!(heap::Vector{QueueNode{Z,T}}, bkv::T) where {Z<:Integer, T<:Real}
 
-Removes all nodes with `implied_bound >= bkv` by scanning from right to left to find the last unprunable node.
+Removes the trailing nodes with `implied_bound >= bkv` from the end of the heap array (everything after the last node with `implied_bound < bkv`).
 
-Scans the heap array from the end backwards to find the rightmost node with `implied_bound < bkv`.
-All nodes beyond that point are removed, and the remaining heap is re-heapified to restore the min-heap property.
+Prunable nodes earlier in the array are kept and discarded when popped. Removing a suffix keeps the heap valid, so no re-heapify is needed.
 
 # Arguments
 - `heap::Vector{QueueNode{Z,T}}`: Min-heap of branch-and-bound queue nodes
@@ -286,11 +285,9 @@ All nodes beyond that point are removed, and the remaining heap is re-heapified 
 1. Scan array from right to left (end to beginning)
 2. Find the last index where `implied_bound < bkv` (last unprunable node)
 3. Truncate array to remove all nodes after that index
-4. Re-heapify the remaining elements to restore min-heap property
 
 # Performance
-More efficient than removing nodes one-by-one when many nodes at the end of the array are prunable.
-Re-heapification is O(n) where n is the remaining heap size.
+O(number of trailing nodes scanned); no heap operations.
 """
 function prune_suboptimal_nodes!(heap::Vector{QueueNode{Z,T}}, bkv::T) where {Z<:Integer, T<:Real}
     if isempty(heap)
