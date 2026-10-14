@@ -634,7 +634,7 @@ Each candidate path is checked against the original constraints before it is acc
 - `infimum_gap_matrices::Matrix{U}`: Precomputed infimum gap matrix with terminal node states
 - `buffer_offset::Int`: Column offset for terminal layer nodes in gap matrices
 - `cont_inf_gap_ctrbtns::Vector{U}`: Continuous variable contributions to infimum gaps
-- `rough_bounds_cont_val::U`: Rough bound estimate for continuous variables
+- `rough_bounds_cont_val::U`: Lower bound on the continuous contribution of any terminal path
 - `lp_sub_model::JuMP.Model`: LP model for continuous variables
 - `lp_vars::Vector{JuMP.VariableRef}`: References to LP variable objects
 - `lp_constraint_refs::Vector{JuMP.ConstraintRef}`: References to LP constraint objects

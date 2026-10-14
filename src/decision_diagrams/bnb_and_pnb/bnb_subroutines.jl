@@ -33,7 +33,7 @@ Type parameters match the problem's integer type (Z) and numerical precision (T)
 - `node_cumulative::Matrix{<:Integer}`: Workspace for cumulative bin counts per node, size: [relaxed_w, max_domain_size] (max value: w, type: Int8/16/32/64 based on w)
 - `global_lower::Vector{<:Integer}`: Workspace for global lower bound estimates per threshold, size: [relaxed_w] (max value: K×w, type: Int8/16/32/64 based on K×w)
 - `global_upper::Vector{<:Integer}`: Workspace for global upper bound estimates per threshold, size: [relaxed_w] (max value: K×w, type: Int8/16/32/64 based on K×w)
-- `bins_matrix::Matrix{<:Integer}`: Workspace for individual arc-to-bin mappings, size: [max_domain_size, relaxed_w] (stores bin index for each in-arc of each parent node, type: Int8/16/32/64 based on w)
+- `bins_matrix::Matrix{<:Integer}`: Workspace for individual arc-to-bin mappings, size: [relaxed_w, max_domain_size] (stores bin index for each in-arc of each node in the layer being split, type: Int8/16/32/64 based on w)
 
 ## Solution Tracking
 - `bks_int::Union{Vector{Z}, BitVector}`: Best known integer solution vector (both DDs)

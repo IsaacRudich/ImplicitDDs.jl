@@ -413,7 +413,7 @@ end
 
 Individual layer in relaxed decision diagram (interval-based representation).
 
-**Location**: `src/decision_diagrams/relaxed_dds/nodes.jl`
+**Location**: `src/decision_diagrams/relaxed_dds/relaxed_nodes.jl`
 
 **Key Fields**:
 
