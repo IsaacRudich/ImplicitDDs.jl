@@ -157,8 +157,8 @@ then uses cumulative counts to find the threshold bin.
     bkv_threshold = bkv - remaining_bound  # Precompute threshold for hot loop
     effective_max_cap = min(max_cap, bkv_threshold)
 
-    # If even the minimum possible cap exceeds BKV, all arcs are suboptimal
-    if min_cap > effective_max_cap
+    # If even the minimum possible cap reaches the cutoff, all arcs are suboptimal (matches the per-arc check below)
+    if min_cap >= bkv_threshold
         return 0, true  # Threshold bin 0 = no arcs pass rough bound filter
     end
 
