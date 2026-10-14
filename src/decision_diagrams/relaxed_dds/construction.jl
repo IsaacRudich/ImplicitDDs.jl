@@ -10,7 +10,6 @@ COMMENTS UP TO DATE
         ubs_int::Union{Vector{Z}, BitVector}, lbs_int::Union{Vector{Z}, BitVector},
         original_lbs_int::Union{Vector{Z}, BitVector},
         bkv::T, num_int_vars::Int, rough_bounds_int::Vector{T}, rough_bounds_cont_val::T,
-        domain::UnitRange, layer_idx::Int,
         lb_matrix::Union{Matrix{Z}, BitMatrix}, ub_matrix::Union{Matrix{Z}, BitMatrix},
         low_indexes::Vector{<:Integer}, high_indexes::Vector{<:Integer},
         infimum_gap_matrices::Matrix{T}, node_matrix::Vector{NodeLayer{Z}},
@@ -38,7 +37,6 @@ Constructs a relaxed decision diagram by node separation iteratively top-down.
 - `num_int_vars::Int`: Number of integer variables
 - `rough_bounds_int::Vector{T}`: Rough bounds for integer variables
 - `rough_bounds_cont_val::T`: Rough bound estimate for continuous variables
-- `domain::UnitRange`: Domain range for the starting variable
 - `layer_idx::Int`: Starting layer index for diagram construction
 - `lb_matrix::Union{Matrix{Z}, BitMatrix}`: Preallocated matrix for lower bound computations
 - `ub_matrix::Union{Matrix{Z}, BitMatrix}`: Preallocated matrix for upper bound computations
@@ -91,7 +89,6 @@ Iteratively constructs relaxed DD layers by:
     #precomputed values
     rough_bounds_int     ::Vector{T},
     rough_bounds_cont_val::T,
-    domain               ::UnitRange,
     layer_idx            ::Int,
 
     #preallocated memory
@@ -164,7 +161,7 @@ Iteratively constructs relaxed DD layers by:
     
         
         @time_operation timing_stats relaxed_dd_split_nodes begin
-            extra_layer, is_exact = split_nodes!(node_matrix, extra_layer, ltr_matrix, next_index, lb_matrix, ub_matrix, int_obj_coeffs, w, domain, timing_stats, arc_count_per_node, node_bin_counts, node_cumulative, global_lower, global_upper, bins_matrix, coeff_times_val, original_lbs_int)
+            extra_layer, is_exact = split_nodes!(node_matrix, extra_layer, ltr_matrix, next_index, lb_matrix, ub_matrix, int_obj_coeffs, w, new_domain, timing_stats, arc_count_per_node, node_bin_counts, node_cumulative, global_lower, global_upper, bins_matrix, coeff_times_val, original_lbs_int)
         end
 
         # Track last exact layer - only update if this extends a contiguous exact sequence
@@ -190,8 +187,6 @@ Iteratively constructs relaxed DD layers by:
             new_buffer_offset = compute_next_infimum_gap_matrix!(infimum_gap_matrices, buffer_offset, w, node_matrix, next_index, lb_matrix, ub_matrix, coefficient_matrix_int_cols, lbs_int, ubs_int, int_var_to_pos_rows, int_var_to_neg_rows)
         end
 
-        #chnage the domain for the next variable
-        domain = new_domain
         buffer_offset = new_buffer_offset
     end
 
@@ -288,7 +283,7 @@ Initializes a relaxed decision diagram from a branch-and-bound queue node with p
 # Returns
 - `Tuple{Int, UnitRange}`: A tuple containing:
   1. `Int`: Layer index where construction should resume
-  2. `UnitRange`: Domain range for the next integer variable
+  2. `UnitRange`: Domain range for the integer variable at `layer_idx`, the root layer of this DD
 
 # Algorithm
 1. Determines the starting layer index from the queue node's partial path length
@@ -533,7 +528,6 @@ function setup_run_process_relaxed_dd!(
                 num_int_vars,
                 rough_bounds_int,
                 rough_bounds_cont_val,
-                domain,
                 1,                    # start layer
                 lb_matrix,
                 ub_matrix,
@@ -823,7 +817,6 @@ function setup_run_process_relaxed_dd!(
                 num_int_vars,
                 rough_bounds_int,
                 rough_bounds_cont_val,
-                domain,
                 layer_idx,# start layer
                 lb_matrix,
                 ub_matrix,
