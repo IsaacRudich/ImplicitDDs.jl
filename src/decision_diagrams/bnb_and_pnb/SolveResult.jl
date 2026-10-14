@@ -10,7 +10,7 @@ Result struct returned by `solve_mip` containing solution data and solver statis
 - `objective_value::T`: Best known objective value (in original objective sense)
 - `objective_bound::T`: Best known lower bound (for minimization) or upper bound (for maximization)
 - `node_count::Int`: Number of branch-and-bound nodes processed
-- `solve_time::Float64`: Total solve time in seconds (excluding model conversion)
+- `solve_time::Float64`: Total solve time in seconds, including model conversion
 - `is_optimal::Bool`: Whether optimality was proven (gap closed, or infeasibility proven)
 - `timed_out::Bool`: Whether the solver terminated due to time limit
 - `unbounded_error::Bool`: Whether the solver failed due to unbounded variables (OBBT failure)

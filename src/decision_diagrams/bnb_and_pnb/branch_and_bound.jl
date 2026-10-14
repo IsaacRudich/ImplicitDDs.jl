@@ -99,16 +99,22 @@ to prove optimality.
 
 # Returns
 
-Returns a tuple `(is_feasible, bks_int, bks_cont, bkv)`:
+Returns a `SolveResult` with fields:
 
 - `is_feasible::Bool`: Whether a feasible solution was found
 - `bks_int`: Best integer variable values (in original model order)
   - If feasible: `BitVector` for binary problems, `Vector{Int8/Int16/Int32/Int64}` otherwise
-  - If infeasible: Empty `Int[]`
+  - If infeasible: Empty
 - `bks_cont::Vector{numerical_precision}`: Best continuous variable values (in original model order)
-  - If infeasible: Empty `Float64[]`
-- `bkv`: Best objective value found (in original objective sense)
+  - If infeasible: Empty
+- `objective_value`: Best objective value found (in original objective sense)
   - If infeasible: `0`
+- `objective_bound`: Best bound (lower for minimization, upper for maximization)
+- `node_count::Int`: Number of branch-and-bound nodes processed
+- `solve_time::Float64`: Total time in seconds, including model conversion
+- `is_optimal::Bool`: Whether optimality or infeasibility was proven
+- `timed_out::Bool`: Whether the time limit was reached
+- `unbounded_error::Bool`: Whether OBBT failed to bound all variables
 
 # Requirements
 
