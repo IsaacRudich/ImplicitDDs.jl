@@ -72,6 +72,13 @@ set_optimizer_attribute(model, MOI.Silent(), true)
 - If finding good solutions is difficult, increase `restricted_w`
 - For problems with few continuous variables, reduce `num_LPs_to_run`
 
+### Numerical Tolerances
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `constraint_feasibility_tol` | Float64 | 1e-6 | Amount by which a returned solution may violate each constraint. |
+| `integer_rounding_tol` | Float64 | 1e-6 | Slack allowed when rounding computed bounds on integer variables. Can be changed, but we don't recommend it. |
+
 ### Performance Parameters
 
 | Parameter | Type | Default | Description |
@@ -102,6 +109,7 @@ set_optimizer_attribute(model, MOI.Silent(), true)
 |-----------|------|---------|-------------|
 | `MOI.TimeLimitSec()` | Float64/Nothing | nothing | Time limit in seconds. |
 | `custom_variable_order` | Vector{MOI.VariableIndex}/Nothing | nothing | Custom ordering for integer variables. Default uses METIS-based ordering. |
+| `max_allowed_domain_size` | Int | 10000 | Largest integer variable domain (ub - lb + 1) accepted. |
 
 ## Example with Configuration
 

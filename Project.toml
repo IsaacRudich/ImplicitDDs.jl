@@ -1,7 +1,7 @@
 name = "ImplicitDDs"
 uuid = "7f79debc-84dd-4872-a081-4bf5bbdabaeb"
 authors = ["Isaac Rudich"]
-version = "0.1.0"
+version = "0.2.0"
 
 [deps]
 Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
@@ -28,7 +28,7 @@ PrecompileTools = "1.2.1"
 Printf = "1.11.0"
 Random = "1.11.0"
 SparseArrays = "1.11.0"
-julia = "1.6"
+julia = "1.11"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
